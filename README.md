@@ -1,0 +1,60 @@
+# TagForge
+
+A small music tag editor in the spirit of Mp3tag. Drag files or folders onto the window,
+select one or many tracks, edit, and press **⌘S** - changes are written straight into the files
+(no backups, no exported copies).
+
+Formats: FLAC, M4A/MP4/M4B, MP3, Ogg Vorbis, Opus, WAV, AIFF.
+
+## Run (Mac)
+1. Install Python 3 from python.org if you don't have it (`python3 --version` in Terminal to check).
+2. Double-click **run.command**. First launch creates a private environment and installs
+   PySide6 + mutagen (needs internet once). If macOS blocks it: right-click → Open.
+   Or in Terminal: `cd` into this folder, then `./run.command`.
+
+## Install as a normal Mac app (once)
+Double-click **Install TagForge.command**. It builds TagForge.app (with its icon), copies it to your
+**Applications** folder (or ~/Applications if that isn't writable), checks that it starts, and opens it.
+Afterwards launch it from Launchpad / Spotlight / Applications, keep it in the Dock, and drop audio
+files or folders onto its Dock icon. Everything it does is logged to
+`~/Library/Logs/TagForge-install.log`; if anything goes wrong, that's the file to send.
+To update later, run the installer again.
+
+## Making a compilation
+Select the tracks → **Tools ▸ Make Compilation…** (⌘K).
+Each track keeps its own **Artist**; **Album Artist** becomes "Various Artists" (editable) and the
+**Compilation** flag is set (`cpil` in M4A, `TCMP` in MP3, `COMPILATION=1` in FLAC/Ogg/Opus).
+Players then show one album instead of one album per artist. Optionally sets the album name and
+numbers the tracks. Then ⌘S.
+
+## Layout
+Left: drop zone, **Add Files / Add Folder**, and tools (**Make Compilation, Auto-number, Rename Files**).
+Middle: the track list (File, #, Title, Artist, Album, Comp.). **Right-click the column headings** to show
+more columns (Album Artist, Year, Genre, Format, Time); your choice is remembered. Right: the tag inspector.
+
+## Editing: edit → Apply → Save
+1. **Edit** fields in the right-hand panel. Nothing changes in the list yet.
+2. Click **Apply to N tracks** (⌘↩) to stage the edits on the selected tracks (rows turn amber/bold).
+   **Discard edits** throws the draft away. Changing selection with an unapplied draft asks what to do.
+3. Click **Save to files** (⌘S, or File ▸ Save) to write every changed track into its file.
+   (Save also applies any pending draft first.) No backups are made; files are changed in place.
+
+- Multi-select edits many files at once. A field with an **orange dashed outline** ("Multiple values")
+  differs between the tracks: type to replace it on every selected track, or click its **✕** to clear it
+  on all of them. A red outline "(will be cleared)" means a clear is pending.
+- Fields: Title, Artist, Album, Album Artist, Compilation, Year/Date, Genre, Track & total,
+  Disc & total, Composer, Comment, BPM, Copyright, Grouping, Lyrics, and sort names
+  (tick "Sort names" in the panel).
+- Cover art: shows the current cover; **Replace cover…** or drop an image file on the window
+  with tracks selected; **Remove** deletes it.
+- **View ▸ Theme** (Match System / Light / Dark) and **View ▸ Larger / Smaller Text** (⌘+ / ⌘- / ⌘0). Both are remembered.
+- Tools: **Auto-number…**, **Rename Files…** (pattern like `%track% - %artist% - %title%`, with preview).
+- Only fields you change are written; other tags (ReplayGain, MusicBrainz IDs, multi-value artists…)
+  are left exactly as they were.
+
+## Files
+- `tagforge.py` - the app window
+- `tagio.py` - reading/writing tags for each format (no GUI)
+- `test_tagio.py` - round-trip tests: `python3 test_tagio.py <folder of sample audio>`
+
+Built on the starter project's field list and Mutagen approach.
