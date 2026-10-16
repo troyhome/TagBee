@@ -12,19 +12,20 @@ from pathlib import Path
 
 import json
 import subprocess
-from PySide6.QtCore import QBuffer, QByteArray, QEasingCurve, QEvent, QIODevice, QSettings, QTimer, QVariantAnimation, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QFont, QGuiApplication, QIcon, QImage, QKeySequence, QPainter, QPixmap
+from PySide6.QtCore import QRectF, QBuffer, QByteArray, QEasingCurve, QEvent, QIODevice, QSettings, QTimer, QVariantAnimation, Qt, Signal
+from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QFont, QGuiApplication, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QFrame, QGraphicsDropShadowEffect, QGridLayout, QGroupBox, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressDialog,
-    QPushButton, QScrollArea, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate,
+    QPushButton, QScrollArea, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
     QTableWidget, QTableWidgetItem, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
 import tagio
 import theme
 from tagio import Track
+from widgets import DropZone, FieldBox, FlatButton, Segmented, eyebrow_font, symbol
 
 APP_NAME = "TagBee"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
@@ -38,9 +39,11 @@ DEFAULT_PT = 16
 COLUMNS = [
     ("file", "File", 150), ("track", "#", 38), ("title", "Title", 150),
     ("artist", "Artist", 120), ("album", "Album", 130), ("albumartist", "Album Artist", 110),
-    ("date", "Year", 50), ("genre", "Genre", 80), ("compilation", "Comp.", 56),
-    ("format", "Format", 56), ("length", "Time", 46),
+    ("date", "Year", 50), ("genre", "Genre", 80), ("compilation", "Comp.", 66),
+    ("format", "Format", 92), ("length", "Time", 58),
 ]
+COLUMN_INDEX = {key: i for i, (key, _, _) in enumerate(COLUMNS)}
+SECONDARY_COLUMNS = {"artist", "album", "albumartist", "date", "genre", "length"}   # dimmer text, like MacBee rows
 
 
 def resource_path(name: str):
@@ -49,13 +52,6 @@ def resource_path(name: str):
         if cand.exists():
             return cand
     return None
-
-
-class ClickLabel(QLabel):
-    clicked = Signal()
-
-    def mousePressEvent(self, e):
-        self.clicked.emit()
 
 
 def natural_key(s: str):
@@ -67,12 +63,25 @@ def fmt_time(sec: float) -> str:
     return f"{sec // 60}:{sec % 60:02d}"
 
 
-class RowHoverDelegate(QStyledItemDelegate):
-    """Highlights the whole row under the mouse, like MacBee's track rows."""
+def rounded(pix: QPixmap, side: int, dpr: float) -> QPixmap:
+    """Square cover with MacBee's rounded corners."""
+    px = int(side * dpr)
+    src = pix.scaled(px, px, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+    out = QPixmap(px, px); out.fill(Qt.transparent)
+    p = QPainter(out); p.setRenderHint(QPainter.Antialiasing); p.setRenderHint(QPainter.SmoothPixmapTransform)
+    path = QPainterPath(); path.addRoundedRect(QRectF(0, 0, px, px), theme.CORNER * dpr, theme.CORNER * dpr)
+    p.setClipPath(path)
+    p.drawPixmap(int((px - src.width()) / 2), int((px - src.height()) / 2), src); p.end()
+    out.setDevicePixelRatio(dpr)
+    return out
 
-    def __init__(self, table: QTableWidget, color):
+
+class RowHoverDelegate(QStyledItemDelegate):
+    """Highlights the whole row under the mouse, like MacBee's track rows; draws format badges."""
+
+    def __init__(self, table: QTableWidget, tokens, badge_col: int):
         super().__init__(table)
-        self.table, self.color, self.row = table, color, -1      # color: callable returning a QColor
+        self.table, self.tokens, self.badge_col, self.row = table, tokens, badge_col, -1   # tokens: callable -> Theme
         table.setMouseTracking(True)
         table.viewport().installEventFilter(self)
         table.verticalScrollBar().valueChanged.connect(lambda _: self.track_cursor())
@@ -94,12 +103,33 @@ class RowHoverDelegate(QStyledItemDelegate):
             self.table.viewport().update()
 
     def paint(self, painter, option, index):
+        t = self.tokens()
         if index.row() == self.row and not option.state & QStyle.State_Selected:
-            painter.fillRect(option.rect, self.color())
+            painter.fillRect(option.rect, t.surface)
         tint = index.data(Qt.BackgroundRole)      # the stylesheet hides item backgrounds, so paint the unsaved tint here
         if tint is not None and tint.color().alpha():
             painter.fillRect(option.rect, tint)
+        if index.column() == self.badge_col and index.data():
+            opt = QStyleOptionViewItem(option); self.initStyleOption(opt, index); opt.text = ""
+            opt.widget.style().drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+            self.paint_badge(painter, option.rect, index.data(), bool(index.data(Qt.UserRole + 2)), t)
+            return
         super().paint(painter, option, index)
+
+    @staticmethod
+    def paint_badge(painter, rect, text: str, hires: bool, t):
+        """MacBee QualityBadge: tiny semibold text in a thin rounded outline; accent for hi-res."""
+        painter.save(); painter.setRenderHint(QPainter.Antialiasing)
+        f = eyebrow_font(painter.font()); f.setLetterSpacing(QFont.AbsoluteSpacing, 0.3); painter.setFont(f)
+        color = t.accent_text if hires else t.text_tertiary
+        fm = painter.fontMetrics()
+        w = min(rect.width() - 10, fm.horizontalAdvance(text) + 10); h = fm.height() + 2
+        box = QRectF(rect.x() + 6, rect.center().y() - h / 2 + 0.5, w, h)
+        painter.setPen(QPen(t.tint(color, 0.7), 1)); painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(box, 3, 3)
+        painter.setPen(color)
+        painter.drawText(box, Qt.AlignCenter, fm.elidedText(text, Qt.ElideRight, int(w - 6)))
+        painter.restore()
 
 
 class CoverLabel(QLabel):
@@ -251,14 +281,14 @@ class CompilationToggle(QWidget):
         super().__init__()
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
-        self.yes = QPushButton("Yes"); self.no = QPushButton("No")
-        self.mixed = QLabel(MULTI); self.mixed.setObjectName("muted")
+        self.yes = FlatButton("Yes", None, "segment"); self.no = FlatButton("No", None, "segment")
+        self.mixed = QLabel(MULTI); self.mixed.setObjectName("mixedlabel")
         for b in (self.yes, self.no):
             b.setCheckable(True)
-            b.setCursor(Qt.PointingHandCursor)
+            b.setMinimumWidth(56)
         self.yes.clicked.connect(lambda: self._pick("1"))
         self.no.clicked.connect(lambda: self._pick(""))
-        row.addWidget(self.yes); row.addWidget(self.no); row.addWidget(self.mixed); row.addStretch(1)
+        row.addWidget(Segmented(self.yes, self.no)); row.addWidget(self.mixed); row.addStretch(1)
         self.set_state(None)
 
     def _pick(self, value):
@@ -316,56 +346,46 @@ class MainWindow(QMainWindow):
         # ===== left sidebar: drop zone, add, tools
         self.sidebar = QWidget(); self.sidebar.setObjectName("sidebar")
         self.sidebar.setAttribute(Qt.WA_StyledBackground, True)
-        sb = QVBoxLayout(self.sidebar); sb.setContentsMargins(14, 14, 14, 14); sb.setSpacing(8)
+        sb = QVBoxLayout(self.sidebar); sb.setContentsMargins(8, 14, 8, 12); sb.setSpacing(2)
 
-        brand = QHBoxLayout(); brand.setSpacing(10)
-        logo = QLabel(); logo.setFixedSize(40, 40)
-        ip = resource_path("icon.png")
-        if ip:
-            logo.setPixmap(QPixmap(str(ip)).scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        names = QVBoxLayout(); names.setSpacing(0)
+        # header like MacBee's: small app icon + bold name
+        brand = QHBoxLayout(); brand.setContentsMargins(10, 0, 10, 0); brand.setSpacing(9)
+        self.logo = QLabel()
         self.brand_title = QLabel(APP_NAME); self.brand_title.setObjectName("brand")
-        sub = QLabel("Music tag editor"); sub.setObjectName("muted")
-        names.addWidget(self.brand_title); names.addWidget(sub)
-        brand.addWidget(logo); brand.addLayout(names, 1)
+        brand.addWidget(self.logo); brand.addWidget(self.brand_title, 1)
         sb.addLayout(brand)
-        sb.addSpacing(6)
+        sb.addSpacing(12)
 
-        self.drop_zone = ClickLabel("Drop music files\nor folders here\n\nFLAC · M4A · MP3\nOGG · OPUS\nWAV · AIFF")
-        self.drop_zone.setObjectName("dropzone"); self.drop_zone.setAlignment(Qt.AlignCenter)
-        self.drop_zone.setCursor(Qt.PointingHandCursor)
-        self.drop_zone.setToolTip("Drop files here, or click to choose files")
+        self.drop_zone = DropZone("Drop music here", "FLAC · M4A · MP3\nOGG · OPUS\nWAV · AIFF\n\nor click to choose files")
+        self.drop_zone.setToolTip("Drop files or folders here, or click to choose files")
         self.drop_zone.clicked.connect(self.add_files_dialog)
         self.drop_zone.setMinimumHeight(150)
         sb.addWidget(self.drop_zone, 1)
+        sb.addSpacing(10)
 
-        def sbutton(text, slot, primary=False, tip=None):
-            b = QPushButton(text)
-            if primary:
-                b.setObjectName("primary")
-            if tip:
-                b.setToolTip(tip)
+        def row(text, icon, slot, tip=None):
+            b = FlatButton(text, icon, "row", tip)
             b.clicked.connect(slot)
-            return b
-
-        sb.addWidget(sbutton("Add Files…", self.add_files_dialog, True))
-        sb.addWidget(sbutton("Add Folder…", self.add_folder_dialog))
+            sb.addWidget(b)
 
         def section(text):
-            l = QLabel(text); l.setObjectName("section"); return l
+            l = QLabel(text.upper()); l.setObjectName("section"); l.setContentsMargins(10, 0, 0, 2)
+            sb.addSpacing(12); sb.addWidget(l)
 
-        sb.addSpacing(6); sb.addWidget(section("TOOLS"))
-        sb.addWidget(sbutton("Make Compilation…", self.make_compilation, tip="Set Album Artist + Compilation flag, keep each track's artist (⌘K)"))
-        sb.addWidget(sbutton("Auto-number…", self.auto_number, tip="Number the selected tracks in list order"))
-        sb.addWidget(sbutton("Rename Files…", self.rename_files, tip="Rename files from their tags"))
-        sb.addSpacing(6); sb.addWidget(section("LIST"))
-        sb.addWidget(sbutton("Remove selected", self.remove_selected, tip="Remove from this window only (files aren't touched)"))
-        sb.addWidget(sbutton("Clear list", self.clear_list))
+        row("Add Files…", "doc.badge.plus", self.add_files_dialog, "Choose audio files (⌘O)")
+        row("Add Folder…", "folder.badge.plus", self.add_folder_dialog, "Add every audio file in a folder (⇧⌘O)")
+        section("Tools")
+        row("Make Compilation…", "person.3", self.make_compilation, "Set Album Artist + Compilation flag, keep each track's artist (⌘K)")
+        row("Auto-number…", "list.number", self.auto_number, "Number the selected tracks in list order")
+        row("Rename Files…", "character.cursor.ibeam", self.rename_files, "Rename files from their tags")
+        section("List")
+        row("Remove Selected", "minus.circle", self.remove_selected, "Remove from this window only (files aren't touched)")
+        row("Clear List", "trash", self.clear_list, "Remove everything from this window (files aren't touched)")
         sb.addStretch(0)
 
         # ===== middle: track list (with an empty-state hint)
         self.table = QTableWidget(0, len(COLUMNS))
-        self.table.setHorizontalHeaderLabels([c[1] for c in COLUMNS])
+        self.table.setHorizontalHeaderLabels([c[1].upper() for c in COLUMNS])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -374,7 +394,7 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(False)
         self.table.setTextElideMode(Qt.ElideRight)
         self.table.setFrameShape(QFrame.NoFrame)
-        self.table.setItemDelegate(RowHoverDelegate(self.table, lambda: self.tokens.surface))
+        self.table.setItemDelegate(RowHoverDelegate(self.table, lambda: self.tokens, COLUMN_INDEX["format"]))
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.row_menu)
         hh = self.table.horizontalHeader()
@@ -399,28 +419,34 @@ class MainWindow(QMainWindow):
         except (ValueError, TypeError):
             pass
 
-        hint = QLabel("Your tracks will appear here")
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setObjectName("emptyhint")
-        self.empty_hint = hint
+        # empty state: big icon, bold title, quiet detail (like MacBee's "no folders yet" page)
+        empty = QWidget(); el = QVBoxLayout(empty); el.setSpacing(8)
+        self.empty_icon = QLabel(); self.empty_icon.setAlignment(Qt.AlignCenter)
+        self.empty_hint = QLabel("No tracks yet"); self.empty_hint.setAlignment(Qt.AlignCenter); self.empty_hint.setObjectName("emptytitle")
+        self.empty_detail = QLabel("Drop music files or folders here, or press ⌘O")
+        self.empty_detail.setAlignment(Qt.AlignCenter); self.empty_detail.setObjectName("muted")
+        el.addStretch(1); el.addWidget(self.empty_icon); el.addWidget(self.empty_hint); el.addWidget(self.empty_detail); el.addStretch(1)
         self.stack = QStackedWidget()
-        self.stack.addWidget(hint)
+        self.stack.addWidget(empty)
         self.stack.addWidget(self.table)
 
         # ===== right: inspector (compact header + two-column tag grid)
         self.panel_title = QLabel()
         self.panel_title.setWordWrap(True)
+        self.panel_title.setObjectName("paneltitle")
         self.panel_hint = QLabel(); self.panel_hint.setWordWrap(True); self.panel_hint.setObjectName("muted")
         self.art_label = CoverLabel()
         self.art_label.setFixedSize(130, 130)
         self.art_label.setAlignment(Qt.AlignCenter)
         self.art_label.setWordWrap(True)
         self.art_label.setToolTip("Drop an image anywhere on the window to set the cover")
-        self.art_info = QLabel(); self.art_info.setObjectName("muted"); self.art_info.setWordWrap(True)
-        replace_btn = QPushButton("Replace…"); replace_btn.clicked.connect(self.choose_cover)
-        remove_btn = QPushButton("Remove"); remove_btn.clicked.connect(self.remove_cover)
-        art_buttons = QHBoxLayout(); art_buttons.setSpacing(6)
-        art_buttons.addWidget(replace_btn); art_buttons.addWidget(remove_btn)
+        self.art_info = QLabel(); self.art_info.setObjectName("faint"); self.art_info.setWordWrap(True)
+        replace_btn = FlatButton("Replace…", "photo", "plain", "Choose a new cover image")
+        replace_btn.clicked.connect(self.choose_cover)
+        remove_btn = FlatButton("Remove", "trash", "plain", "Remove the cover")
+        remove_btn.clicked.connect(self.remove_cover)
+        art_buttons = QHBoxLayout(); art_buttons.setSpacing(4); art_buttons.setContentsMargins(0, 4, 0, 0)
+        art_buttons.addWidget(replace_btn); art_buttons.addWidget(remove_btn); art_buttons.addStretch(1)
         head_text = QVBoxLayout(); head_text.setSpacing(3)
         head_text.addWidget(self.panel_title); head_text.addWidget(self.panel_hint)
         head_text.addWidget(self.art_info); head_text.addLayout(art_buttons); head_text.addStretch(1)
@@ -431,12 +457,10 @@ class MainWindow(QMainWindow):
         self.clear_buttons = {}
 
         def with_clear(key, editor, top=False):
-            box = QWidget()
+            box = FieldBox()
             h = QHBoxLayout(box); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(4)
             h.addWidget(editor, 1)
-            btn = QToolButton(); btn.setText("✕"); btn.setObjectName("clearbtn")
-            btn.setToolTip("Clear this field on every selected track")
-            btn.setCursor(Qt.PointingHandCursor)
+            btn = FlatButton("", "xmark.circle.fill", "clear", "Clear this field on every selected track")
             btn.clicked.connect(lambda _=False, k=key: self.clear_field(k))
             h.addWidget(btn, 0, Qt.AlignTop if top else Qt.AlignVCenter)
             self.clear_buttons[key] = btn
@@ -463,7 +487,7 @@ class MainWindow(QMainWindow):
         def add(row, col, label, widget, span=1):
             cell = QWidget()
             v = QVBoxLayout(cell); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(2)
-            lab = QLabel(label); lab.setObjectName("fieldlabel")
+            lab = QLabel(label.upper()); lab.setObjectName("fieldlabel")
             v.addWidget(lab); v.addWidget(widget)
             grid.addWidget(cell, row, col, 1, span)
 
@@ -496,18 +520,21 @@ class MainWindow(QMainWindow):
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        self.apply_btn = QPushButton("Apply"); self.apply_btn.setObjectName("primary")
+        self.apply_btn = FlatButton("Apply", "checkmark", "accent")
         self.apply_btn.setShortcut("Ctrl+Return")
         self.apply_btn.setToolTip("Stage your edits on the selected tracks (⌘↩). Nothing is written to the files yet.")
         self.apply_btn.clicked.connect(self.apply_draft)
-        self.discard_btn = QPushButton("Discard edits"); self.discard_btn.clicked.connect(self.discard_draft)
-        self.save_btn = QPushButton("Save to files"); self.save_btn.clicked.connect(self.save_all)
+        self.discard_btn = FlatButton("Discard Edits", "arrow.uturn.backward", "plain", "Throw away edits you haven't applied")
+        self.discard_btn.clicked.connect(self.discard_draft)
+        self.save_btn = FlatButton("Save to Files", "square.and.arrow.down", "capsule")
+        self.save_btn.clicked.connect(self.save_all)
         self.save_btn.setToolTip("Apply any pending edits and write every changed track into its file (⌘S)")
         self.pending_label = QLabel(); self.pending_label.setObjectName("pending")
-        bar = QVBoxLayout(); bar.setContentsMargins(12, 6, 12, 10)
+        bar = QVBoxLayout(); bar.setContentsMargins(14, 10, 14, 12); bar.setSpacing(8)
         bar.addWidget(self.pending_label)
         bar.addWidget(self.apply_btn)
-        row = QHBoxLayout(); row.addWidget(self.discard_btn); row.addWidget(self.save_btn)
+        row = QHBoxLayout(); row.setSpacing(8)
+        row.addWidget(self.discard_btn); row.addStretch(1); row.addWidget(self.save_btn)
         bar.addLayout(row)
         self.right = QWidget(); self.right.setObjectName("inspector")
         self.right.setAttribute(Qt.WA_StyledBackground, True)
@@ -670,11 +697,21 @@ class MainWindow(QMainWindow):
             scheme = {"light": Qt.ColorScheme.Light, "system": Qt.ColorScheme.Unknown}.get(self.theme, Qt.ColorScheme.Dark)
             hints.setColorScheme(scheme)
         self.tokens = theme.Theme.make(self.resolved_theme(), self.accent)
+        theme.current = self.tokens                  # FlatButton & co. paint from this
         app = QApplication.instance()
         app.setPalette(self.tokens.palette())
         app.setStyleSheet(self.tokens.stylesheet())
-        for row in range(self.table.rowCount()):   # unsaved-row tint uses the theme
+        for row in range(self.table.rowCount()):   # unsaved-row tint and text colours use the theme
             self.refresh_row(row)
+        if hasattr(self, "logo"):
+            self.apply_type_scale()
+        for w in self.findChildren(FlatButton):
+            w.update()
+
+    def refresh_theme_icons(self):
+        size = int(self.font_pt * 6.5)
+        self.empty_icon.setPixmap(symbol("music.note.list", self.tokens.text_tertiary, size, self.devicePixelRatioF()))
+        self.drop_zone.refresh()
 
     def change_font(self, delta: int, reset: bool = False):
         self.font_pt = DEFAULT_PT if reset else max(10, min(32, self.font_pt + delta))
@@ -689,27 +726,48 @@ class MainWindow(QMainWindow):
         self.setFont(f)
         for w in self.findChildren(QWidget):          # make existing widgets pick up the new size
             w.setFont(f)
-        bold = QFont(f); bold.setBold(True)
-        self.panel_title.setFont(bold)
-        small = QFont(f); small.setPointSizeF(max(9.0, pt - 2))
-        self.art_info.setFont(small); self.panel_hint.setFont(small); self.drop_zone.setFont(small)
-        brand = QFont(f); brand.setBold(True); brand.setPointSizeF(pt + 3); self.brand_title.setFont(brand)
-        sec = QFont(f); sec.setBold(True); sec.setPointSizeF(max(9.0, pt - 4)); [l.setFont(sec) for l in self.sidebar.findChildren(QLabel) if l.objectName() == "section"]
-        big = QFont(f); big.setPointSizeF(pt + 3)
-        self.empty_hint.setFont(big)
+        self.apply_type_scale()
         scale = pt / BASE_PT
         for i, (_, _, w) in enumerate(COLUMNS):
             self.table.setColumnWidth(i, int(w * scale))
-        self.table.verticalHeader().setDefaultSectionSize(int(pt * 2.1))
+        self.table.verticalHeader().setDefaultSectionSize(int(pt * 2.3))
         self.lyrics.setFixedHeight(int(pt * 7))
         art = int(pt * 8.2)
         self.art_label.setFixedSize(art, art)
         self.sidebar.setMinimumWidth(int(pt * 14)); self.right.setMinimumWidth(int(pt * 26))
-        self.statusBar().setFont(f)
         left, right = int(pt * 15.5), int(pt * 29)
         self.split.setSizes([left, max(300, self.width() - left - right), right])
         for row in range(self.table.rowCount()):   # bold flags are per-item fonts
             self.refresh_row(row)
+        self.populate_art(self.panel_tracks)       # cover is drawn at the new size
+
+    def apply_type_scale(self):
+        """MacBee type scale, relative to the chosen text size. Re-run after a theme change."""
+        pt = self.font_pt
+        f = QFont(self.font()); f.setPointSizeF(float(pt))
+        def sized(scale, weight=QFont.Normal):
+            g = QFont(f); g.setPointSizeF(max(9.0, round(pt * scale, 1))); g.setWeight(weight); return g
+        # MacBee type scale (at 13 pt: titles 20-30 bold, body 13, details 11, labels 10 spaced capitals)
+        self.panel_title.setFont(sized(1.4, QFont.Bold))
+        self.brand_title.setFont(sized(1.15, QFont.Bold))
+        self.empty_hint.setFont(sized(1.85, QFont.Bold))
+        self.panel_hint.setFont(sized(0.85)); self.art_info.setFont(sized(0.8))
+        self.drop_zone.title.setFont(sized(0.95, QFont.DemiBold)); self.drop_zone.detail.setFont(sized(0.75))
+        self.pending_label.setFont(sized(0.85, QFont.DemiBold))
+        eyebrow = eyebrow_font(f)
+        for l in self.findChildren(QLabel):
+            if l.objectName() in ("section", "fieldlabel"):
+                l.setFont(eyebrow)
+        self.table.horizontalHeader().setFont(eyebrow)
+        self.table.horizontalHeader().viewport().setFont(eyebrow)   # headings are drawn here
+        self.statusBar().setFont(sized(0.8))
+        logo = int(pt * 1.75)
+        ip = resource_path("icon.png")
+        if ip:
+            pix = QPixmap(str(ip)); pix.setDevicePixelRatio(1.0)
+            pix = pix.scaled(logo * 2, logo * 2, Qt.KeepAspectRatio, Qt.SmoothTransformation); pix.setDevicePixelRatio(2.0)
+            self.logo.setPixmap(pix)
+        self.refresh_theme_icons()
 
     # ---- loading files
     def collect_paths(self, urls: list[str]) -> list[Path]:
@@ -823,7 +881,7 @@ class MainWindow(QMainWindow):
             if key == "file":
                 text, sk = t.path.name, natural_key(t.path.name)
             elif key == "format":
-                text = sk = t.format
+                text = sk = t.quality
             elif key == "length":
                 text, sk = fmt_time(t.length), t.length
             elif key == "compilation":
@@ -840,6 +898,14 @@ class MainWindow(QMainWindow):
             it.setData(Qt.UserRole + 1, sk)
             font = QFont(self.table.font()); font.setBold(dirty and (key in changed or key == "file")); it.setFont(font)
             it.setBackground(self.tokens.pending_row() if dirty else QColor(0, 0, 0, 0))
+            if key == "compilation":
+                it.setForeground(self.tokens.accent_text)
+            elif key == "track":
+                it.setForeground(self.tokens.text_tertiary)
+            elif key in SECONDARY_COLUMNS:
+                it.setForeground(self.tokens.text_secondary)
+            if key == "format":
+                it.setData(Qt.UserRole + 2, t.is_hires)
             if key == "compilation":
                 it.setTextAlignment(Qt.AlignCenter)
 
@@ -945,8 +1011,8 @@ class MainWindow(QMainWindow):
     def show_pixmap(self, data: bytes, note: str):
         pix = QPixmap()
         if pix.loadFromData(data):
-            side = self.art_label.width() - 4
-            self.art_label.setPixmap(pix.scaled(side, side, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            side = self.art_label.width()
+            self.art_label.setPixmap(rounded(pix, side, self.devicePixelRatioF()))
             self.art_info.setText(f"{pix.width()}×{pix.height()} · {note}")
         else:
             self.art_label.setText("Unreadable cover")

@@ -4,7 +4,7 @@ import os
 exts = ["flac", "m4a", "m4b", "mp4", "mp3", "ogg", "opus", "wav", "aif", "aiff"]
 icon = "icon.icns" if os.path.exists("icon.icns") else None
 
-a = Analysis(["tagbee.py"], pathex=["."], datas=[("icon.png", ".")], excludes=["tkinter", "unittest", "pydoc"])
+a = Analysis(["tagbee.py"], pathex=["."], datas=[("icon.png", "."), ("icons", "icons")], excludes=["tkinter", "unittest", "pydoc"])
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="TagBee", console=False,
           argv_emulation=False)

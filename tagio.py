@@ -466,11 +466,28 @@ class Track:
         info = audio.info
         self.length = float(getattr(info, "length", 0) or 0)
         self.bitrate = int(getattr(info, "bitrate", 0) or 0)
+        self.bits = int(getattr(info, "bits_per_sample", 0) or 0)
+        self.sample_rate = int(getattr(info, "sample_rate", 0) or 0)
         self.orig = _READERS[kind](audio)
         self.tags = dict(self.orig)
         art = _ART_READERS[kind](audio)
         self._file_art_digest = _digest(art[1]) if art else ""
         self.art_op = None  # None | ("set", mime, data) | ("remove",)
+
+    # -- format summary, e.g. "FLAC 24/96" or "MP3 320" (shown as a badge)
+    @property
+    def quality(self) -> str:
+        if self.bits and self.sample_rate:
+            khz = self.sample_rate / 1000
+            return f"{self.format} {self.bits}/{khz:g}"
+        if self.bitrate:
+            return f"{self.format} {round(self.bitrate / 1000)}"
+        return self.format
+
+    @property
+    def is_hires(self) -> bool:
+        """24-bit at 88.2 kHz or more (MacBee's hi-res rule)."""
+        return self.bits >= 24 and self.sample_rate >= 88200
 
     # -- state
     def changed_fields(self) -> set:

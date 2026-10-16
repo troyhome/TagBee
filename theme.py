@@ -83,6 +83,16 @@ class Theme:
     def tint(self, color: QColor, alpha: float) -> QColor:
         c = QColor(color); c.setAlphaF(alpha); return c
 
+    @property
+    def accent_text(self) -> QColor:
+        """Accent used for text and icons; a little darker on Light so it stays readable."""
+        if self.is_dark:
+            return self.accent
+        c = QColor(self.accent)
+        while c.lightnessF() > 0.42:
+            c = c.darker(110)
+        return c
+
     def accent_hover(self) -> QColor:
         return self.accent.lighter(112) if self.is_dark else self.accent.darker(108)
 
@@ -110,8 +120,9 @@ class Theme:
 
     def stylesheet(self) -> str:
         c = {k: css(v) for k, v in vars(self).items() if isinstance(v, QColor)}
-        c.update(accent_hover=css(self.accent_hover()), accent_soft=css(self.tint(self.accent, 0.22)),
-                 hover_soft=css(self.tint(self.text_primary, 0.04)), r=CORNER)
+        c.update(accent_hover=css(self.accent_hover()), accent_text=css(self.accent_text), accent_soft=css(self.tint(self.accent, 0.22)),
+                 hover_soft=css(self.tint(self.text_primary, 0.04)),
+                 separator_strong=css(self.tint(self.text_primary, 0.16)), r=CORNER)
         return """
             QWidget {{ color: {text_primary}; }}
             QMainWindow, QDialog, QMessageBox {{ background: {background}; }}
@@ -124,27 +135,26 @@ class Theme:
             QFrame#divider {{ background: {separator}; border: none; max-height: 1px; min-height: 1px; }}
             QSplitter::handle {{ background: {separator}; }}
             QSplitter::handle:horizontal {{ width: 1px; }}
-            QStatusBar {{ background: {bar}; color: {text_secondary}; border-top: 1px solid {separator}; }}
-            QStatusBar QLabel {{ color: {text_secondary}; }}
+            QStatusBar {{ background: {sidebar}; color: {text_tertiary}; border-top: 1px solid {separator}; }}
+            QStatusBar QLabel {{ color: {text_tertiary}; }}
 
             /* ---- text */
             QLabel {{ color: {text_primary}; background: transparent; }}
             QLabel#muted {{ color: {text_secondary}; }}
+            QLabel#faint, QLabel#section, QLabel#fieldlabel {{ color: {text_tertiary}; }}
             QLabel:disabled {{ color: {text_tertiary}; }}
-            QLabel#brand {{ color: {text_primary}; }}
-            QLabel#section {{ color: {text_tertiary}; font-weight: bold; padding-top: 4px; letter-spacing: 1px; }}
-            QLabel#fieldlabel {{ color: {text_secondary}; font-weight: bold; }}
-            QLabel#pending {{ color: {warning}; font-weight: bold; }}
-            QLabel#emptyhint {{ color: {text_tertiary}; }}
+            QLabel#brand, QLabel#paneltitle, QLabel#emptytitle {{ color: {text_primary}; }}
+            QLabel#pending, QLabel#mixedlabel {{ color: {warning}; }}
             QLabel#cover {{ background: {surface}; color: {text_tertiary}; border-radius: {r}px; }}
-            QLabel#dropzone {{ border: 2px dashed {separator}; border-radius: 12px; padding: 14px;
-                color: {text_secondary}; background: transparent; }}
-            QLabel#dropzone:hover {{ border-color: {accent}; color: {text_primary}; background: {hover_soft}; }}
+            QWidget#dropzone {{ border: 1px dashed {separator_strong}; border-radius: 10px; background: transparent; }}
+            QWidget#dropzone:hover {{ border: 1px dashed {accent}; background: {hover_soft}; }}
+            QLabel#droptitle {{ color: {text_secondary}; }}
+            QLabel#dropdetail {{ color: {text_tertiary}; }}
 
             /* ---- fields */
             QLineEdit, QPlainTextEdit, QSpinBox {{
                 background: {surface}; color: {text_primary}; border: 1px solid transparent;
-                border-radius: {r}px; padding: 4px 8px; placeholder-text-color: {text_tertiary};
+                border-radius: {r}px; padding: 5px 9px; placeholder-text-color: {text_tertiary};
                 selection-background-color: {accent_soft}; selection-color: {text_primary}; }}
             QLineEdit:hover, QPlainTextEdit:hover, QSpinBox:hover {{ background: {elevated}; }}
             QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus {{ border: 1px solid {accent}; background: {elevated}; }}
@@ -155,21 +165,15 @@ class Theme:
             QLineEdit[state="cleared"], QPlainTextEdit[state="cleared"] {{
                 border: 1px solid {danger}; placeholder-text-color: {danger}; }}
 
-            /* ---- buttons */
-            QPushButton {{ background: {surface}; color: {text_primary}; border: none;
-                border-radius: {r}px; padding: 6px 14px; }}
+            /* ---- dialog buttons: MacBee capsules (the main window uses widgets.FlatButton) */
+            QPushButton {{ background: {surface}; color: {accent_text}; border: none; font-weight: bold;
+                border-radius: 15px; padding: 4px 18px; min-height: 22px; }}
             QPushButton:hover {{ background: {elevated}; }}
             QPushButton:pressed {{ background: {separator}; }}
-            QPushButton:checked {{ background: {accent}; color: {on_accent}; font-weight: bold; }}
+            QPushButton:default {{ background: {accent}; color: {on_accent}; }}
+            QPushButton:default:hover {{ background: {accent_hover}; }}
             QPushButton:disabled {{ background: {surface}; color: {text_tertiary}; }}
-            QPushButton#primary {{ background: {accent}; color: {on_accent}; font-weight: bold; }}
-            QPushButton#primary:hover {{ background: {accent_hover}; }}
-            QPushButton#primary:disabled {{ background: {surface}; color: {text_tertiary}; }}
-            QToolButton#clearbtn {{ color: {text_tertiary}; background: transparent; border: none;
-                border-radius: {r}px; padding: 3px 7px; }}
-            QToolButton#clearbtn:hover {{ color: white; background: {danger}; }}
-            QToolButton#clearbtn:disabled {{ color: transparent; }}
-            QCheckBox, QGroupBox {{ color: {text_primary}; }}
+            QCheckBox, QGroupBox {{ color: {text_secondary}; }}
             QGroupBox {{ font-weight: bold; border: none; margin-top: 8px; }}
             QDialogButtonBox QPushButton {{ min-width: 72px; }}
 
@@ -180,7 +184,7 @@ class Theme:
             QTableView::item:selected {{ background: {elevated}; color: {text_primary}; }}
             QHeaderView {{ background: {background}; border: none; }}
             QHeaderView::section {{ background: {background}; color: {text_tertiary}; border: none;
-                border-bottom: 1px solid {separator}; padding: 6px 6px 6px 7px; font-weight: bold; }}
+                border-bottom: 1px solid {separator}; padding: 8px 6px 8px 7px; }}
             QHeaderView::section:hover {{ color: {text_primary}; }}
             QTableCornerButton::section {{ background: {background}; border: none; }}
 
@@ -206,3 +210,7 @@ class Theme:
 def css(color: QColor) -> str:
     """QColor -> stylesheet colour (keeps transparency)."""
     return f"rgba({color.red()}, {color.green()}, {color.blue()}, {color.alpha()})"
+
+
+# The active theme. MainWindow.apply_theme() replaces it; widgets.FlatButton paints from it.
+current = Theme.make(DEFAULT_THEME)

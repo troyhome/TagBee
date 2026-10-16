@@ -51,6 +51,7 @@ more columns (Album Artist, Year, Genre, Format, Time); your choice is remembere
 - **View ▸ Theme** (Dark / Medium Gray / Light / Match System), **View ▸ Accent Color** (Cyan, Violet, Orange,
   Green, Pink or Custom…) and **View ▸ Larger / Smaller Text** (⌘+ / ⌘- / ⌘0). All are remembered.
 - Right-click a track for the tools, Show in Finder, Revert and Remove.
+- The Format column shows a quality badge (e.g. FLAC 24/96); hi-res files use the accent colour.
 - Tools: **Auto-number…**, **Rename Files…** (pattern like `%track% - %artist% - %title%`, with preview).
 - Only fields you change are written; other tags (ReplayGain, MusicBrainz IDs, multi-value artists…)
   are left exactly as they were.
@@ -59,7 +60,9 @@ more columns (Album Artist, Year, Genre, Format, Time); your choice is remembere
 - `tagbee.py` - the app window
 - `theme.py` - every colour (MacBee's theme tokens: background, surface, accent…) and the stylesheet
 - `tagio.py` - reading/writing tags for each format (no GUI)
+- `widgets.py` - MacBee-style controls: sidebar rows, flat icon buttons, capsules, Yes/No switch, drop zone
 - `make_icon.py` - draws `icon.png` in MacBee's icon style
+- `make_symbols.swift` - saves the SF Symbols (the same icons MacBee uses) into `icons/`: `swift make_symbols.swift`
 - Folders ending in `.nosync` (libraries and build output) are skipped by iCloud, so they don't upload
 - `test_tagio.py` - round-trip tests: `python3 test_tagio.py <folder of sample audio>`
 

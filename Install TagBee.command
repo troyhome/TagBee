@@ -35,7 +35,7 @@ if ! .venv.nosync/bin/python -c "import PySide6, mutagen" >/dev/null 2>&1; then
     && .venv.nosync/bin/python -m pip install --quiet --upgrade pip \
     && .venv.nosync/bin/python -m pip install --no-compile -r requirements.txt || die "Couldn't install the libraries."
 fi
-.venv.nosync/bin/python -c "import sys; sys.path.insert(0,'.'); import tagio, theme, tagbee; print('App code loads fine')" \
+.venv.nosync/bin/python -c "import sys; sys.path.insert(0,'.'); import tagio, theme, widgets, tagbee; print('App code loads fine')" \
   || die "The app code failed to load."
 
 # ---- 3. icon
@@ -68,7 +68,8 @@ build_standalone() {
 build_launcher() {
   rm -rf dist.nosync/TagBee.app; mkdir -p dist.nosync/TagBee.app/Contents/MacOS dist.nosync/TagBee.app/Contents/Resources
   mkdir -p "$APP_SUPPORT"
-  cp tagbee.py tagio.py theme.py requirements.txt icon.png "$APP_SUPPORT/"
+  cp tagbee.py tagio.py theme.py widgets.py requirements.txt icon.png "$APP_SUPPORT/"
+  rm -rf "$APP_SUPPORT/icons"; cp -R icons "$APP_SUPPORT/icons"
   "$PY" -m venv "$APP_SUPPORT/.venv" \
     && "$APP_SUPPORT/.venv/bin/python" -m pip install --quiet --upgrade pip \
     && "$APP_SUPPORT/.venv/bin/python" -m pip install --no-compile -r "$APP_SUPPORT/requirements.txt" || return 1
