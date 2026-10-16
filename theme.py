@@ -85,10 +85,12 @@ class Theme:
 
     @property
     def accent_text(self) -> QColor:
-        """Accent used for text and icons; a little darker on Light so it stays readable."""
-        if self.is_dark:
-            return self.accent
+        """Accent used for text and icons, adjusted so it stays readable:
+        lighter on dark themes (a dark custom accent), darker on Light."""
         c = QColor(self.accent)
+        if self.is_dark:
+            h, s, l, a = c.getHslF()
+            return QColor.fromHslF(max(h, 0.0), s, l, a) if l >= 0.6 else QColor.fromHslF(max(h, 0.0), s, 0.6, a)
         while c.lightnessF() > 0.42:
             c = c.darker(110)
         return c

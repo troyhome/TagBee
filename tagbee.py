@@ -379,6 +379,8 @@ class MainWindow(QMainWindow):
         row("Auto-number…", "list.number", self.auto_number, "Number the selected tracks in list order")
         row("Rename Files…", "character.cursor.ibeam", self.rename_files, "Rename files from their tags")
         section("List")
+        row("Select All", "checkmark.circle", self.select_all, "Select every track in the list (⌘A)")
+        row("Select None", "circle", self.select_none, "Deselect all tracks (⇧⌘A)")
         row("Remove Selected", "minus.circle", self.remove_selected, "Remove from this window only (files aren't touched)")
         row("Clear List", "trash", self.clear_list, "Remove everything from this window (files aren't touched)")
         sb.addStretch(0)
@@ -575,6 +577,12 @@ class MainWindow(QMainWindow):
         menu.addActions([self.act_revert, self.act_remove])
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
+    def select_all(self):
+        self.table.selectAll()
+
+    def select_none(self):
+        self.table.clearSelection()
+
     def show_in_finder(self):
         paths = [str(t.path) for t in self.selected_tracks()]
         if paths:
@@ -603,14 +611,15 @@ class MainWindow(QMainWindow):
         self.act_comp = act("Make Compilation…", self.make_compilation, "Ctrl+K", "Set Album Artist + Compilation flag, keep track artists")
         self.act_number = act("Auto-number…", self.auto_number, None, "Number the selected tracks in list order")
         self.act_rename = act("Rename Files…", self.rename_files, None, "Rename files from their tags")
-        self.act_selall = act("Select All", lambda: self.table.selectAll(), QKeySequence.SelectAll)
+        self.act_selall = act("Select All", self.select_all, QKeySequence.SelectAll)
+        self.act_selnone = act("Select None", self.select_none, "Ctrl+Shift+A")
 
         m = self.menuBar().addMenu("&File")
         m.addActions([self.act_add, self.act_add_folder]); m.addSeparator()
         m.addAction(self.act_save); m.addSeparator()
         m.addActions([self.act_remove, self.act_clear])
         m = self.menuBar().addMenu("&Edit")
-        m.addActions([self.act_selall, self.act_revert])
+        m.addActions([self.act_selall, self.act_selnone, self.act_revert])
         m = self.menuBar().addMenu("&Tools")
         m.addActions([self.act_comp, self.act_number, self.act_rename])
 
