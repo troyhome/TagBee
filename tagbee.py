@@ -750,6 +750,11 @@ class MainWindow(QMainWindow):
             self.refresh_row(row)
         self.populate_art(self.panel_tracks)       # cover is drawn at the new size
 
+    def set_title_font(self):
+        """Big bold title for tracks; the "Select one or more tracks" prompt stays small."""
+        if hasattr(self, "title_fonts"):
+            self.panel_title.setFont(self.title_fonts[0] if self.panel_tracks else self.title_fonts[1])
+
     def apply_type_scale(self):
         """MacBee type scale, relative to the chosen text size. Re-run after a theme change."""
         pt = self.font_pt
@@ -757,7 +762,8 @@ class MainWindow(QMainWindow):
         def sized(scale, weight=QFont.Normal):
             g = QFont(f); g.setPointSizeF(max(9.0, round(pt * scale, 1))); g.setWeight(weight); return g
         # MacBee type scale (at 13 pt: titles 20-30 bold, body 13, details 11, labels 10 spaced capitals)
-        self.panel_title.setFont(sized(1.4, QFont.Bold))
+        self.title_fonts = (sized(1.4, QFont.Bold), sized(0.95, QFont.DemiBold))   # (tracks selected, nothing selected)
+        self.set_title_font()
         self.brand_title.setFont(sized(1.15, QFont.Bold))
         self.empty_hint.setFont(sized(1.85, QFont.Bold))
         self.panel_hint.setFont(sized(0.85)); self.art_info.setFont(sized(0.8))
@@ -969,11 +975,14 @@ class MainWindow(QMainWindow):
             self.panel_hint.setText("")
             if not tracks:
                 self.panel_title.setText("Select one or more tracks to edit")
+                self.set_title_font()
             elif len(tracks) == 1:
                 self.panel_title.setText(tracks[0].path.name)
+                self.set_title_font()
                 self.panel_hint.setText("Edit, then Apply. Nothing is written until you Save.")
             else:
                 self.panel_title.setText(f"{len(tracks)} tracks selected")
+                self.set_title_font()
                 self.panel_hint.setText("Orange dashed = values differ. Type to replace all, ✕ clears.")
             for key, w in self.widgets.items():
                 vals = {t.tags[key] for t in tracks}
