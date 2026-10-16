@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""TagForge - a small, fast music tag editor (drag & drop, batch edit, compilations).
+"""TagBee - a small, fast music tag editor (drag & drop, batch edit, compilations).
 
-Run:  python3 tagforge.py [files or folders...]
+Run:  python3 tagbee.py [files or folders...]
 """
 from __future__ import annotations
 
@@ -11,33 +11,34 @@ import sys
 from pathlib import Path
 
 import json
-from PySide6.QtCore import QBuffer, QByteArray, QEvent, QIODevice, QSettings, QTimer, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QGuiApplication, QIcon, QImage, QKeySequence, QPalette, QPixmap
+import subprocess
+from PySide6.QtCore import QBuffer, QByteArray, QEasingCurve, QEvent, QIODevice, QSettings, QTimer, QVariantAnimation, Qt, Signal
+from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QFont, QGuiApplication, QIcon, QImage, QKeySequence, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressDialog, QPushButton,
-    QScrollArea, QSpinBox, QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem,
-    QToolBar, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
+    QFileDialog, QFormLayout, QFrame, QGraphicsDropShadowEffect, QGridLayout, QGroupBox, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressDialog,
+    QPushButton, QScrollArea, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate,
+    QTableWidget, QTableWidgetItem, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
 import tagio
+import theme
 from tagio import Track
 
-APP_NAME = "TagForge"
+APP_NAME = "TagBee"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 MULTI = "‹multiple values›"
 MIXED_HINT = "Multiple values"
 CLEARED_HINT = "(will be cleared)"
 BASE_PT = 13          # column widths below are designed for this text size
 DEFAULT_PT = 16
-THEMES = [("system", "Match System"), ("light", "Light"), ("dark", "Dark")]
 
 # table column key, header, default width
 COLUMNS = [
     ("file", "File", 150), ("track", "#", 38), ("title", "Title", 150),
     ("artist", "Artist", 120), ("album", "Album", 130), ("albumartist", "Album Artist", 110),
-    ("date", "Year", 50), ("genre", "Genre", 80), ("compilation", "Comp.", 46),
+    ("date", "Year", 50), ("genre", "Genre", 80), ("compilation", "Comp.", 56),
     ("format", "Format", 56), ("length", "Time", 46),
 ]
 
@@ -64,6 +65,85 @@ def natural_key(s: str):
 def fmt_time(sec: float) -> str:
     sec = int(round(sec))
     return f"{sec // 60}:{sec % 60:02d}"
+
+
+class RowHoverDelegate(QStyledItemDelegate):
+    """Highlights the whole row under the mouse, like MacBee's track rows."""
+
+    def __init__(self, table: QTableWidget, color):
+        super().__init__(table)
+        self.table, self.color, self.row = table, color, -1      # color: callable returning a QColor
+        table.setMouseTracking(True)
+        table.viewport().installEventFilter(self)
+        table.verticalScrollBar().valueChanged.connect(lambda _: self.track_cursor())
+
+    def track_cursor(self):
+        pos = self.table.viewport().mapFromGlobal(QCursor.pos())
+        self.set_row(self.table.rowAt(pos.y()) if self.table.viewport().rect().contains(pos) else -1)
+
+    def eventFilter(self, obj, e):
+        if e.type() == QEvent.MouseMove:
+            self.set_row(self.table.rowAt(e.position().toPoint().y()))
+        elif e.type() == QEvent.Leave:
+            self.set_row(-1)
+        return False
+
+    def set_row(self, row: int):
+        if row != self.row:
+            self.row = row
+            self.table.viewport().update()
+
+    def paint(self, painter, option, index):
+        if index.row() == self.row and not option.state & QStyle.State_Selected:
+            painter.fillRect(option.rect, self.color())
+        tint = index.data(Qt.BackgroundRole)      # the stylesheet hides item backgrounds, so paint the unsaved tint here
+        if tint is not None and tint.color().alpha():
+            painter.fillRect(option.rect, tint)
+        super().paint(painter, option, index)
+
+
+class CoverLabel(QLabel):
+    """Cover art: a soft shadow fades in on hover (150 ms ease-out), like MacBee's album cards."""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("cover")
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setOffset(0, 6)
+        self.setGraphicsEffect(self.shadow)
+        self._level = 0.0
+        self.anim = QVariantAnimation(self)
+        self.anim.setDuration(theme.HOVER_MS)
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.anim.valueChanged.connect(self._step)
+        self._step(0.0)
+
+    def _step(self, v):
+        self._level = float(v)
+        self.shadow.setBlurRadius(4 + 24 * self._level)
+        self.shadow.setColor(QColor(0, 0, 0, int(40 + 120 * self._level)))
+
+    def _fade_to(self, end: float):
+        self.anim.stop()
+        self.anim.setStartValue(self._level)
+        self.anim.setEndValue(end)
+        self.anim.start()
+
+    def enterEvent(self, e):
+        self._fade_to(1.0)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._fade_to(0.0)
+        super().leaveEvent(e)
+
+
+def swatch(color: str) -> QIcon:
+    """Small round colour dot for the Accent Color menu."""
+    pix = QPixmap(28, 28); pix.fill(Qt.transparent)
+    p = QPainter(pix); p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen); p.setBrush(QColor(color)); p.drawEllipse(3, 3, 22, 22); p.end()
+    return QIcon(pix)
 
 
 class SortItem(QTableWidgetItem):
@@ -210,20 +290,24 @@ class MainWindow(QMainWindow):
         self.draft: dict[str, str] = {}          # edits typed but not yet applied
         self.draft_art = None                     # cover change not yet applied
 
-        self.settings = QSettings("TagForge", "TagForge")
+        self.settings = QSettings("TagBee", "TagBee")
+        self.migrate_old_settings()
         try:
             self.font_pt = max(10, min(32, int(self.settings.value("fontSize", DEFAULT_PT))))
         except (TypeError, ValueError):
             self.font_pt = DEFAULT_PT
-        self.theme = str(self.settings.value("theme", "system"))
+        self.theme = str(self.settings.value("theme", theme.DEFAULT_THEME))
+        if self.theme not in dict(theme.THEME_CHOICES):
+            self.theme = theme.DEFAULT_THEME
+        self.accent = str(self.settings.value("accent", theme.DEFAULT_ACCENT))
+        self.tokens = theme.Theme.make(theme.DEFAULT_THEME, self.accent)
         self._build_ui()
         self._build_actions()
         self.apply_theme()
         self.apply_font()
         hints = QGuiApplication.styleHints()
         if hasattr(hints, "colorSchemeChanged"):
-            hints.colorSchemeChanged.connect(lambda *_: self.apply_contrast_style())
-        self.apply_contrast_style()
+            hints.colorSchemeChanged.connect(lambda *_: self.theme == "system" and self.apply_theme())
         self.populate_panel([])
         self.update_status()
 
@@ -287,13 +371,18 @@ class MainWindow(QMainWindow):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
-        self.table.setAlternatingRowColors(True)
+        self.table.setAlternatingRowColors(False)
         self.table.setTextElideMode(Qt.ElideRight)
+        self.table.setFrameShape(QFrame.NoFrame)
+        self.table.setItemDelegate(RowHoverDelegate(self.table, lambda: self.tokens.surface))
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.row_menu)
         hh = self.table.horizontalHeader()
         hh.setSectionsClickable(True)
         hh.setStretchLastSection(False)
         hh.setSectionResizeMode(QHeaderView.Interactive)
         hh.setMinimumSectionSize(36)
+        hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         for i, (key, _, _) in enumerate(COLUMNS):
             if key in ("title", "artist", "album"):
                 hh.setSectionResizeMode(i, QHeaderView.Stretch)   # always share the free width, so Album is visible
@@ -312,6 +401,7 @@ class MainWindow(QMainWindow):
 
         hint = QLabel("Your tracks will appear here")
         hint.setAlignment(Qt.AlignCenter)
+        hint.setObjectName("emptyhint")
         self.empty_hint = hint
         self.stack = QStackedWidget()
         self.stack.addWidget(hint)
@@ -321,12 +411,10 @@ class MainWindow(QMainWindow):
         self.panel_title = QLabel()
         self.panel_title.setWordWrap(True)
         self.panel_hint = QLabel(); self.panel_hint.setWordWrap(True); self.panel_hint.setObjectName("muted")
-        self.art_label = QLabel()
+        self.art_label = CoverLabel()
         self.art_label.setFixedSize(130, 130)
         self.art_label.setAlignment(Qt.AlignCenter)
         self.art_label.setWordWrap(True)
-        self.art_label.setFrameShape(QFrame.StyledPanel)
-        self.art_label.setObjectName("muted")
         self.art_label.setToolTip("Drop an image anywhere on the window to set the cover")
         self.art_info = QLabel(); self.art_info.setObjectName("muted"); self.art_info.setWordWrap(True)
         replace_btn = QPushButton("Replace…"); replace_btn.clicked.connect(self.choose_cover)
@@ -403,7 +491,7 @@ class MainWindow(QMainWindow):
         panel_layout.addLayout(grid)
         panel_layout.addWidget(sort_box)
         panel_layout.addStretch(1)
-        self.panel = QWidget(); self.panel.setLayout(panel_layout)
+        self.panel = QWidget(); self.panel.setLayout(panel_layout); self.panel.setObjectName("inspectorPanel")
         scroll = QScrollArea(); scroll.setWidget(self.panel); scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -422,12 +510,14 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout(); row.addWidget(self.discard_btn); row.addWidget(self.save_btn)
         bar.addLayout(row)
         self.right = QWidget(); self.right.setObjectName("inspector")
+        self.right.setAttribute(Qt.WA_StyledBackground, True)
         rl = QVBoxLayout(self.right); rl.setContentsMargins(0, 0, 0, 0); rl.setSpacing(0)
         rl.addWidget(scroll, 1)
-        sep = QFrame(); sep.setFrameShape(QFrame.HLine); rl.addWidget(sep)
+        sep = QFrame(); sep.setObjectName("divider"); rl.addWidget(sep)
         holder = QWidget(); holder.setLayout(bar); rl.addWidget(holder)
 
         split = QSplitter()
+        split.setHandleWidth(1)
         split.setChildrenCollapsible(False)
         split.addWidget(self.sidebar); split.addWidget(self.stack); split.addWidget(self.right)
         split.setStretchFactor(0, 0); split.setStretchFactor(1, 1); split.setStretchFactor(2, 0)
@@ -444,6 +534,24 @@ class MainWindow(QMainWindow):
             a.setChecked(not self.table.isColumnHidden(i))
             a.toggled.connect(lambda on, i=i: self.set_column_hidden(i, not on))
         menu.exec(self.table.horizontalHeader().mapToGlobal(pos))
+
+    def row_menu(self, pos):
+        """Right-click a track: the usual tools, plus Show in Finder."""
+        row = self.table.rowAt(pos.y())
+        if row < 0:
+            return
+        if not self.table.item(row, 0).isSelected():
+            self.table.selectRow(row)
+        menu = QMenu(self)
+        menu.addActions([self.act_comp, self.act_number, self.act_rename]); menu.addSeparator()
+        menu.addAction("Show in Finder", self.show_in_finder); menu.addSeparator()
+        menu.addActions([self.act_revert, self.act_remove])
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def show_in_finder(self):
+        paths = [str(t.path) for t in self.selected_tracks()]
+        if paths:
+            subprocess.run(["open", "-R", *paths[:20]], check=False)
 
     def set_column_hidden(self, i: int, hidden: bool):
         self.table.setColumnHidden(i, hidden)
@@ -483,12 +591,27 @@ class MainWindow(QMainWindow):
         theme_menu = m.addMenu("Theme")
         group = QActionGroup(self)
         self.theme_actions = {}
-        for key, label in THEMES:
+        for key, label in theme.THEME_CHOICES:
+            if key == "system":
+                theme_menu.addSeparator()
             a = QAction(label, self, checkable=True)
             a.setChecked(key == self.theme)
             a.triggered.connect(lambda _=False, k=key: self.set_theme(k))
             group.addAction(a); theme_menu.addAction(a)
             self.theme_actions[key] = a
+        accent_menu = m.addMenu("Accent Color")
+        agroup = QActionGroup(self)
+        self.accent_actions = {}
+        for key, label, color in theme.ACCENT_CHOICES:
+            a = QAction(swatch(color), label, self, checkable=True)
+            a.triggered.connect(lambda _=False, c=color: self.set_accent(c))
+            agroup.addAction(a); accent_menu.addAction(a)
+            self.accent_actions[color.lower()] = a
+        accent_menu.addSeparator()
+        self.act_custom_accent = QAction("Custom…", self, checkable=True)
+        self.act_custom_accent.triggered.connect(self.pick_accent)
+        agroup.addAction(self.act_custom_accent); accent_menu.addAction(self.act_custom_accent)
+        self.sync_accent_checks()
         m.addSeparator()
         bigger = act("Larger Text", lambda: self.change_font(+1))
         bigger.setShortcuts([QKeySequence("Ctrl+="), QKeySequence("Ctrl++")])
@@ -498,78 +621,60 @@ class MainWindow(QMainWindow):
 
         self.statusBar()
 
-    # ---- appearance
+    # ---- appearance (all colours come from theme.py)
+    def migrate_old_settings(self):
+        """First launch after the rename: carry over text size, columns and Light/Dark from TagForge."""
+        if self.settings.value("migrated", False, type=bool):
+            return
+        old = QSettings("TagForge", "TagForge")
+        for key in ("fontSize", "hiddenCols"):
+            if old.contains(key) and not self.settings.contains(key):
+                self.settings.setValue(key, old.value(key))
+        if str(old.value("theme", "")) in ("light", "dark") and not self.settings.contains("theme"):
+            self.settings.setValue("theme", str(old.value("theme")))
+        self.settings.setValue("migrated", True)
+
     def set_theme(self, key: str):
         self.theme = key
         self.settings.setValue("theme", key)
         self.apply_theme()
 
+    def set_accent(self, color: str):
+        self.accent = QColor(color).name()
+        self.settings.setValue("accent", self.accent)
+        self.sync_accent_checks()
+        self.apply_theme()
+
+    def pick_accent(self):
+        color = QColorDialog.getColor(QColor(self.accent), self, "Accent Color")
+        if color.isValid():
+            self.set_accent(color.name())
+        else:
+            self.sync_accent_checks()          # cancelled: tick the previous choice again
+
+    def sync_accent_checks(self):
+        preset = self.accent_actions.get(self.accent.lower())
+        (preset or self.act_custom_accent).setChecked(True)
+
+    def resolved_theme(self) -> str:
+        if self.theme != "system":
+            return self.theme
+        hints = QGuiApplication.styleHints()
+        if hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Light:
+            return "light"
+        return "dark"
+
     def apply_theme(self):
         hints = QGuiApplication.styleHints()
-        if hasattr(hints, "setColorScheme"):  # Qt 6.8+
-            scheme = {"light": Qt.ColorScheme.Light, "dark": Qt.ColorScheme.Dark}.get(self.theme, Qt.ColorScheme.Unknown)
+        if hasattr(hints, "setColorScheme"):  # Qt 6.8+: also makes the window's title bar match
+            scheme = {"light": Qt.ColorScheme.Light, "system": Qt.ColorScheme.Unknown}.get(self.theme, Qt.ColorScheme.Dark)
             hints.setColorScheme(scheme)
-        QTimer.singleShot(0, self.apply_contrast_style)   # after Qt has switched palettes
-
-    def is_dark(self) -> bool:
-        hints = QGuiApplication.styleHints()
-        if hasattr(hints, "colorScheme"):
-            scheme = hints.colorScheme()
-            if scheme == Qt.ColorScheme.Dark:
-                return True
-            if scheme == Qt.ColorScheme.Light:
-                return False
-        return QApplication.palette().color(QPalette.Window).lightness() < 128
-
-    def apply_contrast_style(self):
-        """Explicit, high-contrast colours for the editor panel (native styling was too faint)."""
-        if self.is_dark():
-            c = dict(text="#ffffff", muted="#d1d1d6", field="#2c2c2e", border="#a1a1a6", btn="#48484a",
-                     dis="#aeaeb2", dis_bg="#262628", dis_border="#636366", hint="#d1d1d6", mixed="#ffb340", clear="#ff6961", side="#2a2a2d")
-        else:
-            c = dict(text="#000000", muted="#3c3c43", field="#ffffff", border="#6e6e73", btn="#f2f2f7",
-                     dis="#636366", dis_bg="#ececf0", dis_border="#aeaeb2", hint="#3c3c43", mixed="#9a5b00", clear="#c1121f", side="#e6e9f0")
-        css = (f"""
-            QLabel {{ color: {c['text']}; }}
-            QLabel#muted {{ color: {c['muted']}; }}
-            QLabel:disabled {{ color: {c['dis']}; }}
-            QLineEdit, QPlainTextEdit {{
-                background: {c['field']}; color: {c['text']}; border: 1px solid {c['border']};
-                border-radius: 5px; padding: 3px 6px; placeholder-text-color: {c['muted']};
-                selection-background-color: #0a84ff; selection-color: white; }}
-            QLineEdit:focus, QPlainTextEdit:focus {{ border: 2px solid #0a84ff; }}
-            QLineEdit:disabled, QPlainTextEdit:disabled {{
-                background: {c['dis_bg']}; color: {c['dis']}; border: 1px solid {c['dis_border']}; }}
-            QPushButton {{ background: {c['btn']}; color: {c['text']}; border: 1px solid {c['border']};
-                border-radius: 5px; padding: 4px 12px; }}
-            QPushButton:hover {{ border: 1px solid #0a84ff; }}
-            QPushButton:checked {{ background: #0a84ff; color: white; border: 1px solid #0a84ff; font-weight: bold; }}
-            QPushButton:disabled {{ background: {c['dis_bg']}; color: {c['dis']}; border: 1px solid {c['dis_border']}; }}
-            QGroupBox {{ color: {c['text']}; font-weight: bold; }}
-            QCheckBox {{ color: {c['text']}; }}
-            QToolButton#clearbtn {{ color: {c['muted']}; background: {c['btn']}; border: 1px solid {c['border']};
-                border-radius: 5px; padding: 3px 7px; }}
-            QToolButton#clearbtn:hover {{ color: white; background: {c['clear']}; border: 1px solid {c['clear']}; }}
-            QToolButton#clearbtn:disabled {{ color: {c['dis']}; background: {c['dis_bg']}; border: 1px solid {c['dis_border']}; }}
-            QLineEdit[state="mixed"], QPlainTextEdit[state="mixed"] {{
-                border: 1px dashed {c['mixed']}; placeholder-text-color: {c['mixed']}; }}
-            QLineEdit[state="edited"], QPlainTextEdit[state="edited"] {{ border: 2px solid #0a84ff; }}
-            QLineEdit[state="cleared"], QPlainTextEdit[state="cleared"] {{
-                border: 2px solid {c['clear']}; placeholder-text-color: {c['clear']}; }}
-            QPushButton#primary {{ background: #0a84ff; color: white; font-weight: bold; border: 1px solid #0a84ff; }}
-            QPushButton#primary:disabled {{ background: {c['dis_bg']}; color: {c['dis']}; border: 1px solid {c['dis_border']}; }}
-            QLabel#pending {{ color: {c['mixed']}; font-weight: bold; }}
-            QLabel#fieldlabel {{ color: {c['muted']}; font-weight: bold; }}
-            QLabel#section {{ color: {c['muted']}; font-weight: bold; padding-top: 2px; }}
-            QLabel#brand {{ color: {c['text']}; }}
-            QLabel#dropzone {{ border: 2px dashed {c['border']}; border-radius: 12px; padding: 14px;
-                color: {c['text']}; background: transparent; }}
-            QLabel#dropzone:hover {{ border-color: #0a84ff; }}
-            QWidget#sidebar {{ background: {c['side']}; }}
-        """)
-        self.right.setStyleSheet(css)
-        self.sidebar.setStyleSheet(css)
-        self.empty_hint.setStyleSheet(f"color: {c['hint']};")
+        self.tokens = theme.Theme.make(self.resolved_theme(), self.accent)
+        app = QApplication.instance()
+        app.setPalette(self.tokens.palette())
+        app.setStyleSheet(self.tokens.stylesheet())
+        for row in range(self.table.rowCount()):   # unsaved-row tint uses the theme
+            self.refresh_row(row)
 
     def change_font(self, delta: int, reset: bool = False):
         self.font_pt = DEFAULT_PT if reset else max(10, min(32, self.font_pt + delta))
@@ -734,7 +839,7 @@ class MainWindow(QMainWindow):
             it.setText(text)
             it.setData(Qt.UserRole + 1, sk)
             font = QFont(self.table.font()); font.setBold(dirty and (key in changed or key == "file")); it.setFont(font)
-            it.setBackground(QColor(255, 190, 0, 55) if dirty else QColor(0, 0, 0, 0))
+            it.setBackground(self.tokens.pending_row() if dirty else QColor(0, 0, 0, 0))
             if key == "compilation":
                 it.setTextAlignment(Qt.AlignCenter)
 
@@ -1100,7 +1205,7 @@ class MainWindow(QMainWindow):
         e.accept()
 
 
-class TagForgeApp(QApplication):
+class TagBeeApp(QApplication):
     """Also receives files dropped on the Dock icon / opened with 'Open With' (macOS)."""
 
     def __init__(self, argv):
@@ -1125,8 +1230,9 @@ class TagForgeApp(QApplication):
 
 
 def main():
-    app = TagForgeApp(sys.argv)
+    app = TagBeeApp(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setStyle("Fusion")      # draws every control from our theme colours (the native Mac style ignores some)
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     for cand in (base / "icon.png", base.parent / "Resources" / "icon.png"):
         if cand.exists():

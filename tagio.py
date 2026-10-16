@@ -1,4 +1,4 @@
-"""tagio.py - the file-format layer for TagForge.
+"""tagio.py - the file-format layer for TagBee.
 
 No GUI code lives here. It reads and writes tags (and cover art) for FLAC, M4A/MP4,
 MP3, Ogg Vorbis, Opus, WAV and AIFF through one uniform set of fields, and only

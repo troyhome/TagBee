@@ -1,12 +1,12 @@
 #!/bin/bash
-# Double-click to install TagForge as a normal Mac app (Applications folder, Launchpad, Dock).
+# Double-click to install TagBee as a normal Mac app (Applications folder, Launchpad, Dock).
 cd "$(dirname "$0")" || exit 1
 SRC="$PWD"
-LOG="$HOME/Library/Logs/TagForge-install.log"
+LOG="$HOME/Library/Logs/TagBee-install.log"
 mkdir -p "$(dirname "$LOG")"
 exec > >(tee "$LOG") 2>&1
 export PYTHONIOENCODING=utf-8
-APP_SUPPORT="$HOME/Library/Application Support/TagForge"
+APP_SUPPORT="$HOME/Library/Application Support/TagBee"
 
 step() { echo; echo "=== $1"; }
 die() {
@@ -29,13 +29,13 @@ echo "Using $PY ($("$PY" --version 2>&1))"
 
 # ---- 2. private environment with the libraries
 step "2/6  Preparing libraries (first time: a few minutes, ~430 MB download)"
-if ! .venv/bin/python -c "import PySide6, mutagen" >/dev/null 2>&1; then
-  rm -rf .venv
-  "$PY" -m venv .venv \
-    && .venv/bin/python -m pip install --quiet --upgrade pip \
-    && .venv/bin/python -m pip install --no-compile -r requirements.txt || die "Couldn't install the libraries."
+if ! .venv.nosync/bin/python -c "import PySide6, mutagen" >/dev/null 2>&1; then
+  rm -rf .venv.nosync
+  "$PY" -m venv .venv.nosync \
+    && .venv.nosync/bin/python -m pip install --quiet --upgrade pip \
+    && .venv.nosync/bin/python -m pip install --no-compile -r requirements.txt || die "Couldn't install the libraries."
 fi
-.venv/bin/python -c "import sys; sys.path.insert(0,'.'); import tagio, tagforge; print('App code loads fine')" \
+.venv.nosync/bin/python -c "import sys; sys.path.insert(0,'.'); import tagio, theme, tagbee; print('App code loads fine')" \
   || die "The app code failed to load."
 
 # ---- 3. icon
@@ -53,40 +53,40 @@ fi
 # ---- 4. build the app (method A: self-contained; method B: lightweight launcher)
 APP=""
 build_standalone() {
-  .venv/bin/python -m pip install --quiet --no-compile pyinstaller || return 1
-  rm -rf build dist
-  .venv/bin/python -m PyInstaller --noconfirm --clean TagForge.spec || return 1
-  [ -x dist/TagForge.app/Contents/MacOS/TagForge ] || return 1
-  codesign --force --deep --sign - dist/TagForge.app >/dev/null 2>&1
+  .venv.nosync/bin/python -m pip install --quiet --no-compile pyinstaller || return 1
+  rm -rf build.nosync dist.nosync
+  .venv.nosync/bin/python -m PyInstaller --noconfirm --clean --workpath build.nosync --distpath dist.nosync TagBee.spec || return 1
+  [ -x dist.nosync/TagBee.app/Contents/MacOS/TagBee ] || return 1
+  codesign --force --deep --sign - dist.nosync/TagBee.app >/dev/null 2>&1
   # smoke test: it must stay running for a few seconds
-  dist/TagForge.app/Contents/MacOS/TagForge >build/smoke.log 2>&1 &
+  dist.nosync/TagBee.app/Contents/MacOS/TagBee >build.nosync/smoke.log 2>&1 &
   local pid=$!; sleep 7
   if kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; return 0; fi
-  echo "The built app quit right after starting. Its output:"; cat build/smoke.log; return 1
+  echo "The built app quit right after starting. Its output:"; cat build.nosync/smoke.log; return 1
 }
 
 build_launcher() {
-  rm -rf dist/TagForge.app; mkdir -p dist/TagForge.app/Contents/MacOS dist/TagForge.app/Contents/Resources
+  rm -rf dist.nosync/TagBee.app; mkdir -p dist.nosync/TagBee.app/Contents/MacOS dist.nosync/TagBee.app/Contents/Resources
   mkdir -p "$APP_SUPPORT"
-  cp tagforge.py tagio.py requirements.txt icon.png "$APP_SUPPORT/"
+  cp tagbee.py tagio.py theme.py requirements.txt icon.png "$APP_SUPPORT/"
   "$PY" -m venv "$APP_SUPPORT/.venv" \
     && "$APP_SUPPORT/.venv/bin/python" -m pip install --quiet --upgrade pip \
     && "$APP_SUPPORT/.venv/bin/python" -m pip install --no-compile -r "$APP_SUPPORT/requirements.txt" || return 1
-  [ -f icon.icns ] && cp icon.icns dist/TagForge.app/Contents/Resources/icon.icns
-  cat > dist/TagForge.app/Contents/MacOS/TagForge <<'LAUNCH'
+  [ -f icon.icns ] && cp icon.icns dist.nosync/TagBee.app/Contents/Resources/icon.icns
+  cat > dist.nosync/TagBee.app/Contents/MacOS/TagBee <<'LAUNCH'
 #!/bin/bash
-S="$HOME/Library/Application Support/TagForge"
-exec "$S/.venv/bin/python" "$S/tagforge.py" "$@"
+S="$HOME/Library/Application Support/TagBee"
+exec "$S/.venv/bin/python" "$S/tagbee.py" "$@"
 LAUNCH
-  chmod +x dist/TagForge.app/Contents/MacOS/TagForge
-  cat > dist/TagForge.app/Contents/Info.plist <<'PLIST'
+  chmod +x dist.nosync/TagBee.app/Contents/MacOS/TagBee
+  cat > dist.nosync/TagBee.app/Contents/Info.plist <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
- <key>CFBundleName</key><string>TagForge</string>
- <key>CFBundleDisplayName</key><string>TagForge</string>
- <key>CFBundleIdentifier</key><string>local.tagforge.launcher</string>
- <key>CFBundleExecutable</key><string>TagForge</string>
+ <key>CFBundleName</key><string>TagBee</string>
+ <key>CFBundleDisplayName</key><string>TagBee</string>
+ <key>CFBundleIdentifier</key><string>local.tagbee.launcher</string>
+ <key>CFBundleExecutable</key><string>TagBee</string>
  <key>CFBundleIconFile</key><string>icon</string>
  <key>CFBundlePackageType</key><string>APPL</string>
  <key>CFBundleShortVersionString</key><string>1.0</string>
@@ -101,17 +101,17 @@ LAUNCH
    </array></dict></array>
 </dict></plist>
 PLIST
-  [ -x dist/TagForge.app/Contents/MacOS/TagForge ]
+  [ -x dist.nosync/TagBee.app/Contents/MacOS/TagBee ]
 }
 
-step "4/6  Building TagForge.app (a few minutes)"
-mkdir -p build
+step "4/6  Building TagBee.app (a few minutes)"
+mkdir -p build.nosync
 if build_standalone; then
-  APP="dist/TagForge.app"; echo "Built the self-contained app."
+  APP="dist.nosync/TagBee.app"; echo "Built the self-contained app."
 else
   echo; echo "Self-contained build didn't work - switching to the lightweight app instead."
   build_launcher || die "Couldn't build the app either way."
-  APP="dist/TagForge.app"; echo "Built the lightweight app."
+  APP="dist.nosync/TagBee.app"; echo "Built the lightweight app."
 fi
 
 # ---- 5. install
@@ -120,19 +120,27 @@ INSTALLED=""
 for DEST in /Applications "$HOME/Applications"; do
   mkdir -p "$DEST" 2>/dev/null
   if [ -w "$DEST" ]; then
-    rm -rf "$DEST/TagForge.app"
-    if ditto "$APP" "$DEST/TagForge.app" 2>/dev/null && [ -x "$DEST/TagForge.app/Contents/MacOS/TagForge" ]; then
-      xattr -cr "$DEST/TagForge.app" 2>/dev/null
-      INSTALLED="$DEST/TagForge.app"; break
+    rm -rf "$DEST/TagBee.app"
+    if ditto "$APP" "$DEST/TagBee.app" 2>/dev/null && [ -x "$DEST/TagBee.app/Contents/MacOS/TagBee" ]; then
+      xattr -cr "$DEST/TagBee.app" 2>/dev/null
+      INSTALLED="$DEST/TagBee.app"; break
     fi
   fi
 done
 [ -n "$INSTALLED" ] || die "Couldn't copy the app into Applications."
 
+# The app used to be called TagForge: move the old copy to the Trash (recoverable) so only TagBee remains.
+for OLD in /Applications/TagForge.app "$HOME/Applications/TagForge.app"; do
+  if [ -d "$OLD" ]; then
+    osascript -e 'quit app "TagForge"' >/dev/null 2>&1
+    mv "$OLD" "$HOME/.Trash/TagForge $(date '+%Y-%m-%d %H.%M.%S').app" && echo "Moved the old TagForge app to the Trash."
+  fi
+done
+
 # ---- 6. finish
 step "6/6  Done"
-echo "TagForge is installed at: $INSTALLED"
-echo "Open it from Launchpad, Spotlight (type TagForge), or the Applications folder."
+echo "TagBee is installed at: $INSTALLED"
+echo "Open it from Launchpad, Spotlight (type TagBee), or the Applications folder."
 echo "Tip: once it's open, right-click its Dock icon > Options > Keep in Dock."
 open -R "$INSTALLED"
 sleep 1

@@ -1,19 +1,19 @@
-# PyInstaller spec - builds TagForge.app. Used by build_app.command.
+# PyInstaller spec - builds TagBee.app. Used by build_app.command.
 import os
 
 exts = ["flac", "m4a", "m4b", "mp4", "mp3", "ogg", "opus", "wav", "aif", "aiff"]
 icon = "icon.icns" if os.path.exists("icon.icns") else None
 
-a = Analysis(["tagforge.py"], pathex=["."], datas=[("icon.png", ".")], excludes=["tkinter", "unittest", "pydoc"])
+a = Analysis(["tagbee.py"], pathex=["."], datas=[("icon.png", ".")], excludes=["tkinter", "unittest", "pydoc"])
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="TagForge", console=False,
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="TagBee", console=False,
           argv_emulation=False)
-coll = COLLECT(exe, a.binaries, a.datas, name="TagForge")
+coll = COLLECT(exe, a.binaries, a.datas, name="TagBee")
 app = BUNDLE(
-    coll, name="TagForge.app", icon=icon, bundle_identifier="local.tagforge.app",
+    coll, name="TagBee.app", icon=icon, bundle_identifier="local.tagbee.app",
     info_plist={
-        "CFBundleName": "TagForge",
-        "CFBundleDisplayName": "TagForge",
+        "CFBundleName": "TagBee",
+        "CFBundleDisplayName": "TagBee",
         "CFBundleShortVersionString": "1.0",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "11.0",

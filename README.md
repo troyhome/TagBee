@@ -1,6 +1,7 @@
-# TagForge
+# TagBee
 
-A small music tag editor in the spirit of Mp3tag. Drag files or folders onto the window,
+A small music tag editor in the spirit of Mp3tag, styled to match the MacBee music player
+(formerly called TagForge). Drag files or folders onto the window,
 select one or many tracks, edit, and press **⌘S** - changes are written straight into the files
 (no backups, no exported copies).
 
@@ -13,11 +14,11 @@ Formats: FLAC, M4A/MP4/M4B, MP3, Ogg Vorbis, Opus, WAV, AIFF.
    Or in Terminal: `cd` into this folder, then `./run.command`.
 
 ## Install as a normal Mac app (once)
-Double-click **Install TagForge.command**. It builds TagForge.app (with its icon), copies it to your
+Double-click **Install TagBee.command**. It builds TagBee.app (with its icon), copies it to your
 **Applications** folder (or ~/Applications if that isn't writable), checks that it starts, and opens it.
-Afterwards launch it from Launchpad / Spotlight / Applications, keep it in the Dock, and drop audio
+If the old TagForge.app is in Applications, the installer moves it to the Trash. Afterwards launch it from Launchpad / Spotlight / Applications, keep it in the Dock, and drop audio
 files or folders onto its Dock icon. Everything it does is logged to
-`~/Library/Logs/TagForge-install.log`; if anything goes wrong, that's the file to send.
+`~/Library/Logs/TagBee-install.log`; if anything goes wrong, that's the file to send.
 To update later, run the installer again.
 
 ## Making a compilation
@@ -47,14 +48,19 @@ more columns (Album Artist, Year, Genre, Format, Time); your choice is remembere
   (tick "Sort names" in the panel).
 - Cover art: shows the current cover; **Replace cover…** or drop an image file on the window
   with tracks selected; **Remove** deletes it.
-- **View ▸ Theme** (Match System / Light / Dark) and **View ▸ Larger / Smaller Text** (⌘+ / ⌘- / ⌘0). Both are remembered.
+- **View ▸ Theme** (Dark / Medium Gray / Light / Match System), **View ▸ Accent Color** (Cyan, Violet, Orange,
+  Green, Pink or Custom…) and **View ▸ Larger / Smaller Text** (⌘+ / ⌘- / ⌘0). All are remembered.
+- Right-click a track for the tools, Show in Finder, Revert and Remove.
 - Tools: **Auto-number…**, **Rename Files…** (pattern like `%track% - %artist% - %title%`, with preview).
 - Only fields you change are written; other tags (ReplayGain, MusicBrainz IDs, multi-value artists…)
   are left exactly as they were.
 
 ## Files
-- `tagforge.py` - the app window
+- `tagbee.py` - the app window
+- `theme.py` - every colour (MacBee's theme tokens: background, surface, accent…) and the stylesheet
 - `tagio.py` - reading/writing tags for each format (no GUI)
+- `make_icon.py` - draws `icon.png` in MacBee's icon style
+- Folders ending in `.nosync` (libraries and build output) are skipped by iCloud, so they don't upload
 - `test_tagio.py` - round-trip tests: `python3 test_tagio.py <folder of sample audio>`
 
 Built on the starter project's field list and Mutagen approach.
