@@ -154,6 +154,7 @@ class Theme:
             QWidget#dropzone[state="drag"] {{ border: 2px dashed {accent}; background: {hover_soft}; }}
             QStackedWidget#center[state="drag"] {{ border: 2px solid {accent}; }}
             QLabel#taglabel {{ color: {text_secondary}; }}
+            QWidget#inspectorPanel QLineEdit, QWidget#inspectorPanel QPlainTextEdit {{ padding: 2px 6px; }}
             QCheckBox::indicator {{ width: 15px; height: 15px; border-radius: 4px;
                 border: 1px solid {separator_strong}; background: {surface}; }}
             QCheckBox::indicator:hover {{ border: 1px solid {accent}; }}

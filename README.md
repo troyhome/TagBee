@@ -43,8 +43,7 @@ Left: **Add Files / Add Folder** and tools (**Make Compilation, Auto-number, Ren
 collapses it to a strip of icons (⌃⌘S). Middle: a drop area when empty, then the track list; drop files or
 folders on it any time. **Right-click the column headings** to show more columns (Album Artist, Year, Genre,
 Format, Time). Right: the tag panel, laid out like Mp3tag's (Title, Artist, Album, Year/Track/Genre, Comment,
-Album Artist, Composer, Disc Number + Compilation, then the cover). The rest (totals, BPM, grouping, copyright,
-lyrics, sort names) is under **More fields**. Bottom: Mp3tag-style totals, `Selected: 3 (11:32 | 89.3 MB)`.
+Album Artist, Composer, Disc Number + Compilation, **More fields** for the rest, then the cover last). Bottom: Mp3tag-style totals, `Selected: 3 (11:32 | 89.3 MB)`.
 
 ## Editing: Apply → Commit to File
 1. **Edit** fields in the tag panel (the edited field gets an accent outline).
@@ -68,7 +67,8 @@ lyrics, sort names) is under **More fields**. Bottom: Mp3tag-style totals, `Sele
   Preferences. All are remembered.
 - Right-click a track for the tools, Show in Finder, Revert and Remove.
 - The Format column shows a quality badge (e.g. FLAC 24/96); hi-res files use the accent colour.
-- Tools: **Auto-number…**, **Rename Files…** (pattern like `%track% - %artist% - %title%`, with preview).
+- Tools: **Auto-number…**, **Rename Files…** (presets: Title - Artist - Track (default), Track - Artist - Title,
+  Artist - Title; or type your own with %track% %artist% %title% %album% …, with preview).
 - Only fields you change are written; other tags (ReplayGain, MusicBrainz IDs, multi-value artists…)
   are left exactly as they were.
 

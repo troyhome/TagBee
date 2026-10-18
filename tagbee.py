@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QFrame, QGraphicsDropShadowEffect, QGridLayout, QGroupBox, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressDialog,
-    QPushButton, QScrollArea, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
+    QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
     QTableWidget, QTableWidgetItem, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -32,6 +32,11 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 MULTI = "< keep >"
 MIXED_HINT = "< keep >"          # Mp3tag's wording: the tracks differ, typing replaces all
 CLEARED_HINT = "< blank >"
+RENAME_PRESETS = [     # (button, pattern); the first is the default
+    ("Title - Artist - Track", "%title% - %artist% - %track%"),
+    ("Track - Artist - Title", "%track% - %artist% - %title%"),
+    ("Artist - Title", "%artist% - %title%"),
+]
 BASE_PT = 13          # column widths below are designed for this text size
 DEFAULT_PT = 16
 
@@ -256,10 +261,16 @@ class RenameDialog(QDialog):
         self.setWindowTitle("Rename Files from Tags")
         self.resize(640, 440)
         lay = QVBoxLayout(self)
-        lay.addWidget(QLabel(
-            "Pattern - use %track% %disc% %title% %artist% %album% %albumartist% %date% %genre% …"
-        ))
-        self.pattern = QLineEdit("%track% - %artist% - %title%")
+        presets = QHBoxLayout(); presets.setSpacing(6)
+        lab = QLabel("Presets:"); lab.setObjectName("muted"); presets.addWidget(lab)
+        for name, pattern in RENAME_PRESETS:
+            b = QPushButton(name); b.setAutoDefault(False)
+            b.clicked.connect(lambda _=False, p=pattern: self.pattern.setText(p))
+            presets.addWidget(b)
+        presets.addStretch(1)
+        lay.addLayout(presets)
+        self.pattern = QLineEdit(RENAME_PRESETS[0][1])
+        self.pattern.setToolTip("Fields you can use: %track% %disc% %title% %artist% %album% %albumartist% %date% %genre%")
         lay.addWidget(self.pattern)
         self.table = QTableWidget(0, 2)
         self.table.setHorizontalHeaderLabels(["Current name", "New name"])
@@ -451,7 +462,7 @@ class MainWindow(QMainWindow):
         self.tokens = theme.Theme.make(theme.DEFAULT_THEME, self.accent)
         self._build_ui()
         self._build_actions()
-        self.panel_scroll.viewport().installEventFilter(self)
+        self.panel_scroll.installEventFilter(self)
         self.apply_theme()
         self.apply_font()
         hints = QGuiApplication.styleHints()
@@ -590,7 +601,7 @@ class MainWindow(QMainWindow):
 
         def labelled(label, widget):
             cell = QWidget()
-            v = QVBoxLayout(cell); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(3)
+            v = QVBoxLayout(cell); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(1)
             lab = QLabel(label + ":"); lab.setObjectName("taglabel")
             v.addWidget(lab); v.addWidget(widget)
             return cell
@@ -600,13 +611,13 @@ class MainWindow(QMainWindow):
                 target.addWidget(labelled(label, widget))
 
             def row(*cells):        # (label, widget, stretch) side by side
-                h = QHBoxLayout(); h.setSpacing(8)
+                h = QHBoxLayout(); h.setSpacing(6)
                 for label, widget, stretch in cells:
                     h.addWidget(labelled(label, widget) if label else widget, stretch)
                 target.addLayout(h)
             return add, row
 
-        fields = QVBoxLayout(); fields.setSpacing(8)
+        fields = QVBoxLayout(); fields.setSpacing(4)
         add, row = column(fields)
         add("Title", line("title"))
         add("Artist", line("artist"))
@@ -616,8 +627,8 @@ class MainWindow(QMainWindow):
         add("Album Artist", line("albumartist"))
         add("Composer", line("composer"))
         disc = labelled("Disc Number", line("disc"))
-        h = QHBoxLayout(); h.setSpacing(12)
-        h.addWidget(disc, 3); h.addWidget(self.comp_check, 5, Qt.AlignBottom)
+        h = QHBoxLayout(); h.setSpacing(10)
+        h.addWidget(disc, 3); h.addWidget(self.comp_check, 8, Qt.AlignBottom)
         fields.addLayout(h)
 
         # cover, full width like Mp3tag (right-click it to replace or remove)
@@ -628,17 +639,18 @@ class MainWindow(QMainWindow):
         self.art_label.setContextMenuPolicy(Qt.CustomContextMenu)
         self.art_label.customContextMenuRequested.connect(self.cover_menu)
         self.art_info = QLabel(); self.art_info.setObjectName("faint")
+        self.art_info.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # never widens the panel
         replace_btn = FlatButton("Replace…", "photo", "plain", "Choose a new cover image")
         replace_btn.clicked.connect(self.choose_cover)
         remove_btn = FlatButton("Remove", "trash", "plain", "Remove the cover")
         remove_btn.clicked.connect(self.remove_cover)
-        art_row = QHBoxLayout(); art_row.setSpacing(4)
+        art_row = QHBoxLayout(); art_row.setSpacing(2)
         art_row.addWidget(self.art_info, 1); art_row.addWidget(replace_btn); art_row.addWidget(remove_btn)
 
-        # everything else TagBee edits, folded away below the cover
-        more = QGroupBox("More fields")
-        more.setCheckable(True); more.setChecked(self.settings.value("moreFields", False, type=bool))
-        more_inner = QWidget(); ml = QVBoxLayout(more_inner); ml.setContentsMargins(0, 4, 0, 0); ml.setSpacing(8)
+        # everything else TagBee edits, folded away under the main fields (the cover stays last)
+        self.more_btn = FlatButton("More fields", "chevron.right", "plain", "Totals, BPM, grouping, copyright, lyrics, sort names")
+        self.more_btn.setCheckable(True)
+        more_inner = QWidget(); ml = QVBoxLayout(more_inner); ml.setContentsMargins(0, 0, 0, 0); ml.setSpacing(4)
         add2, row2 = column(ml)
         row2(("Total Tracks", line("tracktotal"), 1), ("Total Discs", line("disctotal"), 1), ("BPM", line("bpm"), 1))
         add2("Grouping", line("grouping"))
@@ -646,17 +658,25 @@ class MainWindow(QMainWindow):
         add2("Lyrics", self.lyrics)
         for key in ("titlesort", "artistsort", "albumsort", "albumartistsort"):
             add2(tagio.LABELS[key], line(key))
-        mv = QVBoxLayout(more); mv.setContentsMargins(0, 0, 0, 0); mv.addWidget(more_inner)
-        more.toggled.connect(more_inner.setVisible)
-        more.toggled.connect(lambda on: self.settings.setValue("moreFields", on))
-        more_inner.setVisible(more.isChecked())
 
-        panel_layout = QVBoxLayout(); panel_layout.setContentsMargins(12, 10, 12, 10); panel_layout.setSpacing(10)
+        def show_more(on):
+            more_inner.setVisible(on)
+            self.more_btn.icon_name = "chevron.down" if on else "chevron.right"
+            self.more_btn.update()
+            self.settings.setValue("moreFields", on)
+        self.more_btn.toggled.connect(show_more)
+        self.more_btn.setChecked(self.settings.value("moreFields", False, type=bool))
+        show_more(self.more_btn.isChecked())
+
+        # order like Mp3tag: tag fields, then the cover last
+        panel_layout = QVBoxLayout(); panel_layout.setContentsMargins(10, 8, 10, 8); panel_layout.setSpacing(4)
         panel_layout.addWidget(self.panel_title)
         panel_layout.addLayout(fields)
-        panel_layout.addWidget(self.art_label)
+        panel_layout.addWidget(self.more_btn, 0, Qt.AlignLeft)
+        panel_layout.addWidget(more_inner)
+        panel_layout.addSpacing(4)
         panel_layout.addLayout(art_row)
-        panel_layout.addWidget(more)
+        panel_layout.addWidget(self.art_label)
         panel_layout.addStretch(1)
         self.panel = QWidget(); self.panel.setLayout(panel_layout); self.panel.setObjectName("inspectorPanel")
         scroll = QScrollArea(); scroll.setWidget(self.panel); scroll.setWidgetResizable(True)
@@ -674,7 +694,7 @@ class MainWindow(QMainWindow):
         self.save_btn = FlatButton("Commit to File", "square.and.arrow.down", "accent",
                                    "Apply any edits and write every changed track into its file (⌘S)")
         self.save_btn.clicked.connect(self.save_all)
-        bar = QHBoxLayout(); bar.setContentsMargins(12, 10, 12, 12); bar.setSpacing(6)
+        bar = QHBoxLayout(); bar.setContentsMargins(10, 6, 10, 8); bar.setSpacing(4)
         bar.addWidget(self.apply_btn); bar.addWidget(self.revert_btn); bar.addStretch(1); bar.addWidget(self.save_btn)
         self.right = QWidget(); self.right.setObjectName("inspector")
         self.right.setAttribute(Qt.WA_StyledBackground, True)
@@ -903,13 +923,14 @@ class MainWindow(QMainWindow):
 
     def size_cover(self):
         """The cover fills the tag panel's width, like Mp3tag."""
-        side = max(120, self.panel_scroll.viewport().width() - 24)
+        # room for the margins and the scroll bar, so the cover never pushes the panel wider than it is
+        side = max(120, self.panel_scroll.width() - 20 - self.panel_scroll.verticalScrollBar().sizeHint().width())
         if self.art_label.width() != side:
             self.art_label.setFixedSize(side, side)
             self.populate_art(self.panel_tracks)
 
     def eventFilter(self, obj, e):
-        if obj is self.panel_scroll.viewport() and e.type() == QEvent.Resize:
+        if obj is self.panel_scroll and e.type() == QEvent.Resize:
             QTimer.singleShot(0, self.size_cover)
         return super().eventFilter(obj, e)
 
@@ -924,9 +945,15 @@ class MainWindow(QMainWindow):
         self.brand_title.setFont(sized(1.15, QFont.Bold))
         self.drop_area.title.setFont(sized(1.85, QFont.Bold))
         self.art_info.setFont(sized(0.8)); self.drop_note.setFont(sized(0.8))
+        small = sized(0.88)
         for l in self.findChildren(QLabel):
             if l.objectName() == "taglabel":
-                l.setFont(sized(0.85))
+                l.setFont(sized(0.8))
+        for w in self.panel.findChildren(QWidget):
+            if isinstance(w, (QLineEdit, QPlainTextEdit, QCheckBox, FlatButton)):
+                w.setFont(small)
+        for b in (self.apply_btn, self.revert_btn, self.save_btn):
+            b.setFont(small)
         eyebrow = eyebrow_font(f)
         for l in self.findChildren(QLabel):
             if l.objectName() in ("section", "fieldlabel"):
@@ -972,12 +999,14 @@ class MainWindow(QMainWindow):
             return
         errors = []
         progress = None
-        if len(paths) > 25:
-            progress = QProgressDialog("Reading tags…", "Cancel", 0, len(paths), self)
-            progress.setWindowModality(Qt.WindowModal); progress.setMinimumDuration(300)
+        if len(paths) > 3:
+            progress = QProgressDialog("Loading files…", "Cancel", 0, len(paths), self)
+            progress.setWindowTitle(APP_NAME)
+            progress.setWindowModality(Qt.WindowModal); progress.setMinimumDuration(200)
         added = []
         for i, p in enumerate(paths):
             if progress:
+                progress.setLabelText(f"Loading files…\n{i + 1} of {len(paths)}")
                 progress.setValue(i)
                 if progress.wasCanceled():
                     break
@@ -1009,6 +1038,8 @@ class MainWindow(QMainWindow):
         if errors:
             QMessageBox.warning(self, APP_NAME, "Some files couldn't be read:\n\n" + "\n".join(errors[:15]))
         self.update_status()
+        n = len(added)
+        self.statusBar().showMessage(f"Added {n} file{'s' if n != 1 else ''}.", 5000)
 
     def add_files_dialog(self):
         exts = " ".join(f"*{e}" for e in sorted(tagio.SUPPORTED_EXTS))
@@ -1141,7 +1172,7 @@ class MainWindow(QMainWindow):
         else:
             self.sidebar.setMinimumWidth(self.sidebar_width); self.sidebar.setMaximumWidth(self.sidebar_width)
         left = self.sidebar.minimumWidth()
-        right = int(pt * 26)
+        right = int(pt * 23)
         self.split.setSizes([left, max(300, self.width() - left - right), right])
 
     # ---- tag panel: edits go straight onto the selected tracks; Save writes them
