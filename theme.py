@@ -171,7 +171,7 @@ class Theme:
             QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus {{ border: 1px solid {accent}; background: {elevated}; }}
             QLineEdit:disabled, QPlainTextEdit:disabled {{ background: {surface}; color: {text_tertiary}; }}
             QLineEdit[state="mixed"], QPlainTextEdit[state="mixed"] {{
-                border: 1px dashed {warning}; placeholder-text-color: {warning}; }}
+                border: 1px dashed {separator_strong}; placeholder-text-color: {text_secondary}; }}
             QLineEdit[state="edited"], QPlainTextEdit[state="edited"] {{ border: 1px solid {accent}; }}
             QLineEdit[state="cleared"], QPlainTextEdit[state="cleared"] {{
                 border: 1px solid {danger}; placeholder-text-color: {danger}; }}

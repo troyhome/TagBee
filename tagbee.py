@@ -928,6 +928,26 @@ class MainWindow(QMainWindow):
             self.refresh_row(row)
         self.populate_art(self.panel_tracks)       # cover is drawn at the new size
 
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not getattr(self, "_fitted", False):
+            self._fitted = True
+            QTimer.singleShot(0, self.fit_height)
+
+    def fit_height(self):
+        """Open just tall enough for the whole tag panel (fields, cover, buttons) to show without scrolling."""
+        self.size_cover()
+        self.panel.adjustSize()
+        need = self.height() - self.panel_scroll.viewport().height() + self.panel.sizeHint().height()
+        screen = self.screen().availableGeometry() if self.screen() else None
+        if screen:
+            need = min(need, screen.height())
+        g = self.geometry()
+        g.setHeight(need)
+        if screen and g.bottom() > screen.bottom():
+            g.moveTop(max(screen.top(), screen.bottom() - need))
+        self.setGeometry(g)
+
     def size_cover(self):
         """The cover fills the tag panel's width, like Mp3tag."""
         # room for the margins and the scroll bar, so the cover never pushes the panel wider than it is
@@ -953,11 +973,14 @@ class MainWindow(QMainWindow):
         self.drop_area.title.setFont(sized(1.85, QFont.Bold))
         self.art_info.setFont(sized(0.8)); self.drop_note.setFont(sized(0.8))
         small = sized(0.88)
+        self.field_font = sized(0.82)              # tag fields and their menus: regular weight, a bit smaller
         for l in self.findChildren(QLabel):
             if l.objectName() == "taglabel":
                 l.setFont(sized(0.8))
         for w in self.panel.findChildren(QWidget):
-            if isinstance(w, (QLineEdit, QPlainTextEdit, QCheckBox, FlatButton)):
+            if isinstance(w, (QLineEdit, QPlainTextEdit)):
+                w.setFont(self.field_font)
+            elif isinstance(w, (QCheckBox, FlatButton)):
                 w.setFont(small)
         for b in (self.apply_btn, self.revert_btn, self.save_btn):
             b.setFont(small)
@@ -1244,7 +1267,7 @@ class MainWindow(QMainWindow):
         if not self.panel_tracks:
             return
         w = self.widgets[key]
-        menu = QMenu(self)
+        menu = QMenu(self); menu.setFont(self.field_font)
         orig = self.panel_orig.get(key, [])
         if len(set(orig)) > 1:
             menu.addAction(MIXED_HINT, lambda: self.restore_field(key))
