@@ -438,7 +438,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
         screen = QGuiApplication.primaryScreen()
         avail = screen.availableGeometry() if screen else None
-        self.resize(int(avail.width() * 0.92), int(avail.height() * 0.92)) if avail else self.resize(1440, 820)
+        # first launch: a modest landscape window in the middle of the screen; later, wherever you left it
+        w, h = (min(1180, int(avail.width() * 0.8)), min(720, int(avail.height() * 0.75))) if avail else (1180, 720)
+        self.resize(w, h)
+        if avail:
+            self.move(avail.x() + (avail.width() - w) // 2, avail.y() + (avail.height() - h) // 2)
         self.setAcceptDrops(True)
         self.tracks: dict[int, Track] = {}
         self._next_uid = 0
@@ -451,6 +455,9 @@ class MainWindow(QMainWindow):
 
         self.settings = QSettings("TagBee", "TagBee")
         self.migrate_old_settings()
+        geometry = self.settings.value("windowGeometry")
+        if geometry:
+            self.restoreGeometry(geometry)
         try:
             self.font_pt = max(10, min(32, int(self.settings.value("fontSize", DEFAULT_PT))))
         except (TypeError, ValueError):
@@ -1558,6 +1565,7 @@ class MainWindow(QMainWindow):
             if r == QMessageBox.Cancel or (r == QMessageBox.Save and not self.save_all()):
                 e.ignore()
                 return
+        self.settings.setValue("windowGeometry", self.saveGeometry())
         e.accept()
 
 
