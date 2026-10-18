@@ -21,6 +21,16 @@ files or folders onto its Dock icon. Everything it does is logged to
 `~/Library/Logs/TagBee-install.log`; if anything goes wrong, that's the file to send.
 To update later, run the installer again.
 
+## Updating (and setting up another Mac)
+After the first setup, just open **Update TagBee** in Applications: it pulls the newest version from
+GitHub, rebuilds TagBee.app and reopens it (or says it's already up to date). Log: `~/Library/Logs/TagBee-update.log`.
+
+First time on a Mac, paste this in Terminal (needs Python 3; macOS offers to install it if missing):
+
+    git clone https://github.com/troyhome/TagBee ~/Projects/TagBee && ~/Projects/TagBee/Tools/tagbee.sh setup
+
+That installs TagBee.app and makes the Update TagBee app. From Terminal: `Tools/tagbee.sh update`.
+
 ## Making a compilation
 Select the tracks → **Tools ▸ Make Compilation…** (⌘K).
 Each track keeps its own **Artist**; **Album Artist** becomes "Various Artists" (editable) and the

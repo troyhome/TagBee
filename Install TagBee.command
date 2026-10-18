@@ -13,6 +13,7 @@ die() {
   echo; echo "!!! $1"
   echo "A full log was saved to: $LOG"
   echo "If you ask Claude for help, attach that file (it's selected in Finder now)."
+  [ -n "$TAGBEE_QUIET" ] && exit 1
   open -R "$LOG" 2>/dev/null
   read -p "Press Return to close"; exit 1
 }
@@ -118,6 +119,7 @@ fi
 # ---- 5. install
 step "5/6  Installing"
 INSTALLED=""
+osascript -e 'quit app "TagBee"' >/dev/null 2>&1; sleep 1
 for DEST in /Applications "$HOME/Applications"; do
   mkdir -p "$DEST" 2>/dev/null
   if [ -w "$DEST" ]; then
@@ -143,8 +145,8 @@ step "6/6  Done"
 echo "TagBee is installed at: $INSTALLED"
 echo "Open it from Launchpad, Spotlight (type TagBee), or the Applications folder."
 echo "Tip: once it's open, right-click its Dock icon > Options > Keep in Dock."
-open -R "$INSTALLED"
-sleep 1
+[ -z "$TAGBEE_QUIET" ] && open -R "$INSTALLED" && sleep 1
 open "$INSTALLED"
+[ -n "$TAGBEE_QUIET" ] && exit 0
 echo
 read -p "Press Return to close this window"
