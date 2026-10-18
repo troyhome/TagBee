@@ -39,20 +39,20 @@ Players then show one album instead of one album per artist. Optionally sets the
 numbers the tracks. Then ⌘S.
 
 ## Layout
-Left: drop zone, **Add Files / Add Folder**, and tools (**Make Compilation, Auto-number, Rename Files**).
+Left: **Add Files / Add Folder** and tools (**Make Compilation, Auto-number, Rename Files**). The button at the top
+collapses it to a strip of icons (⌃⌘S). Drop files or folders anywhere on the window.
 Middle: the track list (File, #, Title, Artist, Album, Comp.). **Right-click the column headings** to show
-more columns (Album Artist, Year, Genre, Format, Time); your choice is remembered. Right: the tag inspector.
+more columns (Album Artist, Year, Genre, Format, Time); your choice is remembered. Right: the tag panel, laid out
+like Mp3tag's (one column, cover at the bottom). Bottom: Mp3tag-style totals, `Selected: 3 (11:32 | 89.3 MB)`.
 
-## Editing: edit → Apply → Save
-1. **Edit** fields in the right-hand panel. Nothing changes in the list yet.
-2. Click **Apply to N tracks** (⌘↩) to stage the edits on the selected tracks (rows turn amber/bold).
-   **Discard edits** throws the draft away. Changing selection with an unapplied draft asks what to do.
-3. Click **Save to files** (⌘S, or File ▸ Save) to write every changed track into its file.
-   (Save also applies any pending draft first.) No backups are made; files are changed in place.
+## Editing: edit → Save
+Select tracks and type in the tag panel. Changes go onto the selected tracks right away (rows turn amber/bold),
+then **Save** (⌘S) writes every changed track into its file. **Revert** (⌘R) undoes unsaved changes on the
+selected tracks. No backups are made; files are changed in place.
 
-- Multi-select edits many files at once. A field with an **orange dashed outline** ("Multiple values")
-  differs between the tracks: type to replace it on every selected track, or click its **✕** to clear it
-  on all of them. A red outline "(will be cleared)" means a clear is pending.
+- Multi-select edits many files at once. **< keep >** (orange dashed outline) means the tracks differ: type to
+  replace it on all of them. Each field's **▾** menu offers < keep >, < blank > (clear it on all) or any value the
+  selected tracks already have, like Mp3tag.
 - Fields: Title, Artist, Album, Album Artist, Compilation, Year/Date, Genre, Track & total,
   Disc & total, Composer, Comment, BPM, Copyright, Grouping, Lyrics, and sort names
   (tick "Sort names" in the panel).
@@ -70,7 +70,7 @@ more columns (Album Artist, Year, Genre, Format, Time); your choice is remembere
 - `tagbee.py` - the app window
 - `theme.py` - every colour (MacBee's theme tokens: background, surface, accent…) and the stylesheet
 - `tagio.py` - reading/writing tags for each format (no GUI)
-- `widgets.py` - MacBee-style controls: sidebar rows, flat icon buttons, capsules, Yes/No switch, drop zone
+- `widgets.py` - MacBee-style controls: sidebar rows, flat icon buttons, capsules, Yes/No switch
 - `make_icon.py` - draws `icon.png` in MacBee's icon style
 - `make_symbols.swift` - saves the SF Symbols (the same icons MacBee uses) into `icons/`: `swift make_symbols.swift`
 - Folders ending in `.nosync` (libraries and build output) are skipped by iCloud, so they don't upload

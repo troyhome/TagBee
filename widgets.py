@@ -165,6 +165,8 @@ class FlatButton(QAbstractButton):
         icon_pt = self._icon_pt() if self.icon_name else 0
         text_w = fm.horizontalAdvance(self.text()) if self.text() else 0
         gap = 3 if (icon_pt and text_w) else 0
+        if not text_w:
+            align = Qt.AlignCenter          # icon-only (collapsed sidebar rows): centre it
         x = 4.0 if align == Qt.AlignLeft else (r.width() - icon_pt - gap - text_w) / 2
         if icon_pt:
             p.drawPixmap(int(x), int((r.height() - icon_pt) / 2), symbol(self.icon_name, icon_c, icon_pt, self.devicePixelRatioF()))
@@ -204,36 +206,3 @@ class FieldBox(QWidget):
             for b in self.findChildren(FlatButton):
                 b.update()
         return super().event(e)
-
-
-class DropZone(QWidget):
-    """Quiet dashed drop target with an icon; click to choose files."""
-    clicked = Signal()
-
-    def __init__(self, title: str, detail: str):
-        super().__init__()
-        self.setObjectName("dropzone")
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setAttribute(Qt.WA_Hover)
-        self.setCursor(Qt.PointingHandCursor)
-        lay = QVBoxLayout(self); lay.setContentsMargins(14, 14, 14, 14); lay.setSpacing(6)
-        self.icon = QLabel(); self.icon.setAlignment(Qt.AlignCenter)
-        self.title = QLabel(title); self.title.setAlignment(Qt.AlignCenter); self.title.setObjectName("droptitle")
-        self.detail = QLabel(detail); self.detail.setAlignment(Qt.AlignCenter); self.detail.setObjectName("dropdetail")
-        self.title.setWordWrap(True); self.detail.setWordWrap(True)
-        lay.addStretch(1); lay.addWidget(self.icon); lay.addWidget(self.title); lay.addWidget(self.detail); lay.addStretch(1)
-        self.refresh()
-
-    def refresh(self):
-        t = theme.current
-        size = int(self.title.fontMetrics().height() * 3.2)
-        self.icon.setPixmap(symbol("arrow.down.to.line", t.accent if self.underMouse() else t.text_tertiary, size,
-                                   self.devicePixelRatioF()))
-
-    def event(self, e):
-        if e.type() in (e.Type.HoverEnter, e.Type.HoverLeave):
-            self.refresh()
-        return super().event(e)
-
-    def mousePressEvent(self, e):
-        self.clicked.emit()

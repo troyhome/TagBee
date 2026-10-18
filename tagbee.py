@@ -25,13 +25,13 @@ from PySide6.QtWidgets import (
 import tagio
 import theme
 from tagio import Track
-from widgets import DropZone, FieldBox, FlatButton, Segmented, eyebrow_font, symbol
+from widgets import FieldBox, FlatButton, Segmented, eyebrow_font, symbol
 
 APP_NAME = "TagBee"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
-MULTI = "‹multiple values›"
-MIXED_HINT = "Multiple values"
-CLEARED_HINT = "(will be cleared)"
+MULTI = "< keep >"
+MIXED_HINT = "< keep >"          # Mp3tag's wording: the tracks differ, typing replaces all
+CLEARED_HINT = "< blank >"
 BASE_PT = 13          # column widths below are designed for this text size
 DEFAULT_PT = 16
 
@@ -61,6 +61,20 @@ def natural_key(s: str):
 def fmt_time(sec: float) -> str:
     sec = int(round(sec))
     return f"{sec // 60}:{sec % 60:02d}"
+
+
+def fmt_duration(sec: float) -> str:
+    """Total time for the status bar: 4:05, 1:02:09."""
+    sec = int(round(sec))
+    h, m, s = sec // 3600, sec // 60 % 60, sec % 60
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def fmt_size(n: int) -> str:
+    for unit in ("bytes", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit in ("bytes", "KB") else f"{n:.1f} {unit}"
+        n /= 1024
 
 
 def rounded(pix: QPixmap, side: int, dpr: float) -> QPixmap:
@@ -317,8 +331,7 @@ class MainWindow(QMainWindow):
         self._populating = False
         self._sort_col, self._sort_order = None, Qt.AscendingOrder
         self.panel_tracks: list[Track] = []      # tracks currently shown in the editor panel
-        self.draft: dict[str, str] = {}          # edits typed but not yet applied
-        self.draft_art = None                     # cover change not yet applied
+        self.panel_orig: dict[str, list[str]] = {}   # each field's values when the tracks were selected
 
         self.settings = QSettings("TagBee", "TagBee")
         self.migrate_old_settings()
@@ -343,34 +356,35 @@ class MainWindow(QMainWindow):
 
     # ---- UI construction: sidebar | track list | inspector
     def _build_ui(self):
-        # ===== left sidebar: drop zone, add, tools
+        # ===== left sidebar: add, tools (files are dropped on the track list). Collapses to an icon rail.
         self.sidebar = QWidget(); self.sidebar.setObjectName("sidebar")
         self.sidebar.setAttribute(Qt.WA_StyledBackground, True)
         sb = QVBoxLayout(self.sidebar); sb.setContentsMargins(8, 14, 8, 12); sb.setSpacing(2)
+        self.sidebar_collapsed = self.settings.value("sidebarCollapsed", False, type=bool)
+        self.sidebar_rows: list[tuple[FlatButton, str]] = []
+        self.sidebar_sections: list[QLabel] = []
 
-        # header like MacBee's: small app icon + bold name
-        brand = QHBoxLayout(); brand.setContentsMargins(10, 0, 10, 0); brand.setSpacing(9)
+        # header like MacBee's: small app icon + bold name, and the collapse button
+        brand = QHBoxLayout(); brand.setContentsMargins(10, 0, 0, 0); brand.setSpacing(9)
         self.logo = QLabel()
         self.brand_title = QLabel(APP_NAME); self.brand_title.setObjectName("brand")
-        brand.addWidget(self.logo); brand.addWidget(self.brand_title, 1)
+        self.collapse_btn = FlatButton("", "sidebar.left", "plain", "Hide or show the sidebar (⌃⌘S)")
+        self.collapse_btn.clicked.connect(self.toggle_sidebar)
+        brand.addWidget(self.logo); brand.addWidget(self.brand_title, 1); brand.addWidget(self.collapse_btn)
+        self.brand_row = brand
         sb.addLayout(brand)
-        sb.addSpacing(12)
-
-        self.drop_zone = DropZone("Drop music here", "FLAC · M4A · MP3\nOGG · OPUS\nWAV · AIFF\n\nor click to choose files")
-        self.drop_zone.setToolTip("Drop files or folders here, or click to choose files")
-        self.drop_zone.clicked.connect(self.add_files_dialog)
-        self.drop_zone.setMinimumHeight(150)
-        sb.addWidget(self.drop_zone, 1)
         sb.addSpacing(10)
 
         def row(text, icon, slot, tip=None):
-            b = FlatButton(text, icon, "row", tip)
+            b = FlatButton(text, icon, "row", tip or text)
             b.clicked.connect(slot)
             sb.addWidget(b)
+            self.sidebar_rows.append((b, text))
 
         def section(text):
             l = QLabel(text.upper()); l.setObjectName("section"); l.setContentsMargins(10, 0, 0, 2)
             sb.addSpacing(12); sb.addWidget(l)
+            self.sidebar_sections.append(l)
 
         row("Add Files…", "doc.badge.plus", self.add_files_dialog, "Choose audio files (⌘O)")
         row("Add Folder…", "folder.badge.plus", self.add_folder_dialog, "Add every audio file in a folder (⇧⌘O)")
@@ -383,7 +397,7 @@ class MainWindow(QMainWindow):
         row("Select None", "circle", self.select_none, "Deselect all tracks (⇧⌘A)")
         row("Remove Selected", "minus.circle", self.remove_selected, "Remove from this window only (files aren't touched)")
         row("Clear List", "trash", self.clear_list, "Remove everything from this window (files aren't touched)")
-        sb.addStretch(0)
+        sb.addStretch(1)
 
         # ===== middle: track list (with an empty-state hint)
         self.table = QTableWidget(0, len(COLUMNS))
@@ -425,54 +439,32 @@ class MainWindow(QMainWindow):
         empty = QWidget(); el = QVBoxLayout(empty); el.setSpacing(8)
         self.empty_icon = QLabel(); self.empty_icon.setAlignment(Qt.AlignCenter)
         self.empty_hint = QLabel("No tracks yet"); self.empty_hint.setAlignment(Qt.AlignCenter); self.empty_hint.setObjectName("emptytitle")
-        self.empty_detail = QLabel("Drop music files or folders here, or press ⌘O")
+        self.empty_detail = QLabel("Drag music files or folders here, or press ⌘O")
         self.empty_detail.setAlignment(Qt.AlignCenter); self.empty_detail.setObjectName("muted")
         el.addStretch(1); el.addWidget(self.empty_icon); el.addWidget(self.empty_hint); el.addWidget(self.empty_detail); el.addStretch(1)
         self.stack = QStackedWidget()
         self.stack.addWidget(empty)
         self.stack.addWidget(self.table)
 
-        # ===== right: inspector (compact header + two-column tag grid)
+        # ===== right: tag panel like Mp3tag's - one column of fields, label above each, cover at the bottom.
+        # Edits go straight onto the selected tracks (rows turn amber); Save writes them, Revert undoes them.
         self.panel_title = QLabel()
         self.panel_title.setWordWrap(True)
         self.panel_title.setObjectName("paneltitle")
         self.panel_hint = QLabel(); self.panel_hint.setWordWrap(True); self.panel_hint.setObjectName("muted")
-        self.art_label = CoverLabel()
-        self.art_label.setFixedSize(130, 130)
-        self.art_label.setAlignment(Qt.AlignCenter)
-        self.art_label.setWordWrap(True)
-        self.art_label.setToolTip("Drop an image anywhere on the window to set the cover")
-        self.art_info = QLabel(); self.art_info.setObjectName("faint"); self.art_info.setWordWrap(True)
-        replace_btn = FlatButton("Replace…", "photo", "plain", "Choose a new cover image")
-        replace_btn.clicked.connect(self.choose_cover)
-        remove_btn = FlatButton("Remove", "trash", "plain", "Remove the cover")
-        remove_btn.clicked.connect(self.remove_cover)
-        art_buttons = QHBoxLayout(); art_buttons.setSpacing(4); art_buttons.setContentsMargins(0, 4, 0, 0)
-        art_buttons.addWidget(replace_btn); art_buttons.addWidget(remove_btn); art_buttons.addStretch(1)
-        head_text = QVBoxLayout(); head_text.setSpacing(3)
-        head_text.addWidget(self.panel_title); head_text.addWidget(self.panel_hint)
-        head_text.addWidget(self.art_info); head_text.addLayout(art_buttons); head_text.addStretch(1)
-        header = QHBoxLayout(); header.setSpacing(12)
-        header.addWidget(self.art_label, 0, Qt.AlignTop); header.addLayout(head_text, 1)
 
         self.widgets: dict[str, QWidget] = {}
-        self.clear_buttons = {}
-
-        def with_clear(key, editor, top=False):
-            box = FieldBox()
-            h = QHBoxLayout(box); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(4)
-            h.addWidget(editor, 1)
-            btn = FlatButton("", "xmark.circle.fill", "clear", "Clear this field on every selected track")
-            btn.clicked.connect(lambda _=False, k=key: self.clear_field(k))
-            h.addWidget(btn, 0, Qt.AlignTop if top else Qt.AlignVCenter)
-            self.clear_buttons[key] = btn
-            return box
+        self.menu_actions: list[QAction] = []
 
         def line(key):
             w = QLineEdit()
             w.textEdited.connect(lambda text, k=key: self.on_field_edited(k, text))
+            a = w.addAction(QIcon(), QLineEdit.TrailingPosition)
+            a.setToolTip("< keep >, < blank >, or a value from the selected tracks")
+            a.triggered.connect(lambda _=False, k=key: self.value_menu(k))
+            self.menu_actions.append(a)
             self.widgets[key] = w
-            return with_clear(key, w)
+            return w
 
         self.comp_combo = CompilationToggle()
         self.comp_combo.chosen.connect(lambda v: self.on_field_edited("compilation", v))
@@ -483,25 +475,37 @@ class MainWindow(QMainWindow):
         self.lyrics.textChanged.connect(self.on_lyrics_changed)
         self.widgets["lyrics"] = self.lyrics
 
-        grid = QGridLayout(); grid.setHorizontalSpacing(10); grid.setVerticalSpacing(6)
-        grid.setColumnStretch(0, 1); grid.setColumnStretch(1, 1)
+        fields = QVBoxLayout(); fields.setSpacing(7)
 
-        def add(row, col, label, widget, span=1):
+        def labelled(label, widget):
             cell = QWidget()
             v = QVBoxLayout(cell); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(2)
             lab = QLabel(label.upper()); lab.setObjectName("fieldlabel")
             v.addWidget(lab); v.addWidget(widget)
-            grid.addWidget(cell, row, col, 1, span)
+            return cell
 
-        add(0, 0, "Title", line("title"));            add(0, 1, "Artist", line("artist"))
-        add(1, 0, "Album", line("album"));            add(1, 1, "Album Artist", line("albumartist"))
-        add(2, 0, "Compilation", self.comp_combo);    add(2, 1, "Year / Date", line("date"))
-        add(3, 0, "Genre", line("genre"));            add(3, 1, "Composer", line("composer"))
-        add(4, 0, "Track", line("track"));            add(4, 1, "Total tracks", line("tracktotal"))
-        add(5, 0, "Disc", line("disc"));              add(5, 1, "Total discs", line("disctotal"))
-        add(6, 0, "BPM", line("bpm"));                add(6, 1, "Grouping", line("grouping"))
-        add(7, 0, "Copyright", line("copyright"));    add(7, 1, "Comment", line("comment"))
-        add(8, 0, "Lyrics", with_clear("lyrics", self.lyrics, top=True), span=2)
+        def add(label, widget):
+            fields.addWidget(labelled(label, widget))
+
+        def pair(a, wa, b, wb):
+            h = QHBoxLayout(); h.setSpacing(10)
+            h.addWidget(labelled(a, wa), 1); h.addWidget(labelled(b, wb), 1)
+            fields.addLayout(h)
+
+        add("Title", line("title"))
+        add("Artist", line("artist"))
+        add("Album", line("album"))
+        add("Album Artist", line("albumartist"))
+        add("Compilation", self.comp_combo)
+        pair("Year", line("date"), "BPM", line("bpm"))
+        pair("Track", line("track"), "Total tracks", line("tracktotal"))
+        pair("Disc", line("disc"), "Total discs", line("disctotal"))
+        add("Genre", line("genre"))
+        add("Composer", line("composer"))
+        add("Comment", line("comment"))
+        add("Grouping", line("grouping"))
+        add("Copyright", line("copyright"))
+        add("Lyrics", self.lyrics)
 
         sort_box = QGroupBox("Sort names (optional)")
         sort_box.setCheckable(True); sort_box.setChecked(False)
@@ -512,32 +516,43 @@ class MainWindow(QMainWindow):
         sort_box.toggled.connect(lambda on: [w.setVisible(on) for w in sort_inner if w])
         sort_box.toggled.emit(False)
 
-        panel_layout = QVBoxLayout(); panel_layout.setContentsMargins(12, 12, 12, 6); panel_layout.setSpacing(10)
-        panel_layout.addLayout(header)
-        panel_layout.addLayout(grid)
+        # cover, at the bottom like Mp3tag
+        self.art_label = CoverLabel()
+        self.art_label.setFixedSize(160, 160)
+        self.art_label.setAlignment(Qt.AlignCenter)
+        self.art_label.setWordWrap(True)
+        self.art_label.setToolTip("Drop an image anywhere on the window to set the cover")
+        self.art_info = QLabel(); self.art_info.setObjectName("faint"); self.art_info.setWordWrap(True)
+        replace_btn = FlatButton("Replace…", "photo", "plain", "Choose a new cover image")
+        replace_btn.clicked.connect(self.choose_cover)
+        remove_btn = FlatButton("Remove", "trash", "plain", "Remove the cover")
+        remove_btn.clicked.connect(self.remove_cover)
+        art_side = QVBoxLayout(); art_side.setSpacing(4)
+        art_side.addWidget(self.art_info); art_side.addWidget(replace_btn, 0, Qt.AlignLeft)
+        art_side.addWidget(remove_btn, 0, Qt.AlignLeft); art_side.addStretch(1)
+        art_row = QHBoxLayout(); art_row.setSpacing(12)
+        art_row.addWidget(self.art_label, 0, Qt.AlignTop); art_row.addLayout(art_side, 1)
+        cover_label = QLabel("COVER"); cover_label.setObjectName("fieldlabel")
+
+        panel_layout = QVBoxLayout(); panel_layout.setContentsMargins(14, 12, 14, 10); panel_layout.setSpacing(10)
+        panel_layout.addWidget(self.panel_title); panel_layout.addWidget(self.panel_hint)
+        panel_layout.addLayout(fields)
         panel_layout.addWidget(sort_box)
+        panel_layout.addSpacing(4)
+        panel_layout.addWidget(cover_label); panel_layout.addLayout(art_row)
         panel_layout.addStretch(1)
         self.panel = QWidget(); self.panel.setLayout(panel_layout); self.panel.setObjectName("inspectorPanel")
         scroll = QScrollArea(); scroll.setWidget(self.panel); scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        self.apply_btn = FlatButton("Apply", "checkmark", "accent")
-        self.apply_btn.setShortcut("Ctrl+Return")
-        self.apply_btn.setToolTip("Stage your edits on the selected tracks (⌘↩). Nothing is written to the files yet.")
-        self.apply_btn.clicked.connect(self.apply_draft)
-        self.discard_btn = FlatButton("Discard Edits", "arrow.uturn.backward", "plain", "Throw away edits you haven't applied")
-        self.discard_btn.clicked.connect(self.discard_draft)
-        self.save_btn = FlatButton("Save to Files", "square.and.arrow.down", "capsule")
+        # one save button (like Mp3tag's), plus Revert
+        self.revert_btn = FlatButton("Revert", "arrow.uturn.backward", "plain", "Undo unsaved changes on the selected tracks (⌘R)")
+        self.revert_btn.clicked.connect(self.revert_selected)
+        self.save_btn = FlatButton("Save", "square.and.arrow.down", "accent", "Write every changed track into its file (⌘S)")
         self.save_btn.clicked.connect(self.save_all)
-        self.save_btn.setToolTip("Apply any pending edits and write every changed track into its file (⌘S)")
-        self.pending_label = QLabel(); self.pending_label.setObjectName("pending")
-        bar = QVBoxLayout(); bar.setContentsMargins(14, 10, 14, 12); bar.setSpacing(8)
-        bar.addWidget(self.pending_label)
-        bar.addWidget(self.apply_btn)
-        row = QHBoxLayout(); row.setSpacing(8)
-        row.addWidget(self.discard_btn); row.addStretch(1); row.addWidget(self.save_btn)
-        bar.addLayout(row)
+        bar = QHBoxLayout(); bar.setContentsMargins(14, 10, 14, 12); bar.setSpacing(8)
+        bar.addWidget(self.revert_btn); bar.addStretch(1); bar.addWidget(self.save_btn)
         self.right = QWidget(); self.right.setObjectName("inspector")
         self.right.setAttribute(Qt.WA_StyledBackground, True)
         rl = QVBoxLayout(self.right); rl.setContentsMargins(0, 0, 0, 0); rl.setSpacing(0)
@@ -654,8 +669,16 @@ class MainWindow(QMainWindow):
         smaller = act("Smaller Text", lambda: self.change_font(-1), "Ctrl+-")
         reset = act("Default Text Size", lambda: self.change_font(0, reset=True), "Ctrl+0")
         m.addActions([bigger, smaller, reset])
+        m.addSeparator()
+        m.addAction(act("Show / Hide Sidebar", self.toggle_sidebar, "Meta+Ctrl+S"))
 
-        self.statusBar()
+        # Mp3tag-style totals on the right of the status bar
+        sb = self.statusBar()
+        self.stat_unsaved = QLabel(); self.stat_unsaved.setObjectName("pending")
+        self.stat_sel = QLabel(); self.stat_total = QLabel()
+        for l in (self.stat_unsaved, self.stat_sel, self.stat_total):
+            l.setContentsMargins(10, 0, 10, 0)
+            sb.addPermanentWidget(l)
 
     # ---- appearance (all colours come from theme.py)
     def migrate_old_settings(self):
@@ -720,7 +743,9 @@ class MainWindow(QMainWindow):
     def refresh_theme_icons(self):
         size = int(self.font_pt * 6.5)
         self.empty_icon.setPixmap(symbol("music.note.list", self.tokens.text_tertiary, size, self.devicePixelRatioF()))
-        self.drop_zone.refresh()
+        chevron = QIcon(symbol("chevron.down", self.tokens.text_tertiary, 14, self.devicePixelRatioF()))
+        for a in self.menu_actions:
+            a.setIcon(chevron)
 
     def change_font(self, delta: int, reset: bool = False):
         self.font_pt = DEFAULT_PT if reset else max(10, min(32, self.font_pt + delta))
@@ -741,11 +766,10 @@ class MainWindow(QMainWindow):
             self.table.setColumnWidth(i, int(w * scale))
         self.table.verticalHeader().setDefaultSectionSize(int(pt * 2.3))
         self.lyrics.setFixedHeight(int(pt * 7))
-        art = int(pt * 8.2)
+        art = int(pt * 10)
         self.art_label.setFixedSize(art, art)
-        self.sidebar.setMinimumWidth(int(pt * 14)); self.right.setMinimumWidth(int(pt * 26))
-        left, right = int(pt * 15.5), int(pt * 29)
-        self.split.setSizes([left, max(300, self.width() - left - right), right])
+        self.right.setMinimumWidth(int(pt * 22))
+        self.apply_sidebar()
         for row in range(self.table.rowCount()):   # bold flags are per-item fonts
             self.refresh_row(row)
         self.populate_art(self.panel_tracks)       # cover is drawn at the new size
@@ -767,8 +791,6 @@ class MainWindow(QMainWindow):
         self.brand_title.setFont(sized(1.15, QFont.Bold))
         self.empty_hint.setFont(sized(1.85, QFont.Bold))
         self.panel_hint.setFont(sized(0.85)); self.art_info.setFont(sized(0.8))
-        self.drop_zone.title.setFont(sized(0.95, QFont.DemiBold)); self.drop_zone.detail.setFont(sized(0.75))
-        self.pending_label.setFont(sized(0.85, QFont.DemiBold))
         eyebrow = eyebrow_font(f)
         for l in self.findChildren(QLabel):
             if l.objectName() in ("section", "fieldlabel"):
@@ -776,6 +798,8 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setFont(eyebrow)
         self.table.horizontalHeader().viewport().setFont(eyebrow)   # headings are drawn here
         self.statusBar().setFont(sized(0.8))
+        for l in (self.stat_unsaved, self.stat_sel, self.stat_total):
+            l.setFont(sized(0.8, QFont.DemiBold if l is self.stat_unsaved else QFont.Normal))
         logo = int(pt * 1.75)
         ip = resource_path("icon.png")
         if ip:
@@ -823,6 +847,7 @@ class MainWindow(QMainWindow):
                     break
             try:
                 t = Track(p)
+                t.size = p.stat().st_size
             except Exception as exc:
                 errors.append(f"{p.name}: {exc}")
                 continue
@@ -939,80 +964,129 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSortIndicator(col, self._sort_order)
         self.table.sortItems(col, self._sort_order)
 
-    # ---- editor panel: edits are drafted here and only staged when you click Apply
-    def has_draft(self) -> bool:
-        return bool(self.draft) or self.draft_art is not None
+    # ---- sidebar
+    def toggle_sidebar(self):
+        self.sidebar_collapsed = not self.sidebar_collapsed
+        self.settings.setValue("sidebarCollapsed", self.sidebar_collapsed)
+        self.apply_sidebar()
 
+    def apply_sidebar(self):
+        """Full sidebar, or a narrow rail of icons (hover for names)."""
+        c = self.sidebar_collapsed
+        self.logo.setVisible(not c); self.brand_title.setVisible(not c)
+        self.brand_row.setContentsMargins(0 if c else 10, 0, 0, 0)
+        for b, text in self.sidebar_rows:
+            b.setText("" if c else text)
+        for l in self.sidebar_sections:
+            l.setVisible(not c)
+        pt = self.font_pt
+        if c:
+            w = self.sidebar_rows[0][0].sizeHint().width() + 16
+            self.sidebar.setMinimumWidth(w); self.sidebar.setMaximumWidth(w)
+        else:
+            self.sidebar.setMinimumWidth(int(pt * 14)); self.sidebar.setMaximumWidth(16777215)
+        left = self.sidebar.minimumWidth() if c else int(pt * 15.5)
+        right = int(pt * 26)
+        self.split.setSizes([left, max(300, self.width() - left - right), right])
+
+    # ---- tag panel: edits go straight onto the selected tracks; Save writes them
     @staticmethod
     def mark(w, state: str):
         w.setProperty("state", state)
         w.style().unpolish(w); w.style().polish(w); w.update()
 
     def on_selection_changed(self):
-        if self.has_draft():
-            n = len(self.panel_tracks)
-            box = QMessageBox(self)
-            box.setWindowTitle(APP_NAME)
-            box.setText(f"You have edits that haven't been applied to the {n} track{'s' if n != 1 else ''} you were editing.")
-            box.setInformativeText("Apply them now? (Applying doesn't write to the files - Save does that.)")
-            apply_b = box.addButton("Apply", QMessageBox.AcceptRole)
-            box.addButton("Discard", QMessageBox.DestructiveRole)
-            box.setDefaultButton(apply_b)
-            box.exec()
-            if box.clickedButton() is apply_b:
-                self.apply_draft()
-            self.draft, self.draft_art = {}, None
         self.populate_panel(self.selected_tracks())
+        self.update_status()
 
     def populate_panel(self, tracks: list[Track]):
         self._populating = True
         try:
             self.panel_tracks = list(tracks)
-            self.draft, self.draft_art = {}, None
+            self.panel_orig = {k: [t.tags[k] for t in tracks] for k in self.widgets}   # for "< keep >"
             self.panel.setEnabled(bool(tracks))
-            for b in self.clear_buttons.values():
-                b.setEnabled(bool(tracks))
             self.panel_hint.setText("")
             if not tracks:
                 self.panel_title.setText("Select one or more tracks to edit")
-                self.set_title_font()
             elif len(tracks) == 1:
                 self.panel_title.setText(tracks[0].path.name)
-                self.set_title_font()
-                self.panel_hint.setText("Edit, then Apply. Nothing is written until you Save.")
             else:
                 self.panel_title.setText(f"{len(tracks)} tracks selected")
-                self.set_title_font()
-                self.panel_hint.setText("Orange dashed = values differ. Type to replace all, ✕ clears.")
-            for key, w in self.widgets.items():
-                vals = {t.tags[key] for t in tracks}
-                mixed = len(vals) > 1
-                value = "" if (mixed or not vals) else next(iter(vals))
-                if key == "compilation":
-                    w.set_state(None if (mixed or not tracks) else ("1" if value else ""), show_label=bool(tracks))
-                    continue
-                if key == "lyrics":
-                    w.setPlainText(value)
-                    w.setPlaceholderText(MIXED_HINT if mixed else "")
-                else:
-                    w.setText(value)
-                    w.setPlaceholderText(("mixed" if w.maximumWidth() < 120 else MIXED_HINT) if mixed else "")
-                self.mark(w, "mixed" if mixed else "")
+                self.panel_hint.setText("< keep > means the tracks differ. Type to replace it on all of them.")
+            self.set_title_font()
+            for key in self.widgets:
+                self.show_field(key)
             self.populate_art(tracks)
         finally:
             self._populating = False
         self.update_buttons()
 
+    def show_field(self, key: str):
+        """Show a field's current value, or < keep > when the selected tracks differ."""
+        w = self.widgets[key]
+        vals = {t.tags[key] for t in self.panel_tracks}
+        mixed = len(vals) > 1
+        value = "" if (mixed or not vals) else next(iter(vals))
+        was = self._populating
+        self._populating = True
+        try:
+            if key == "compilation":
+                w.set_state(None if (mixed or not self.panel_tracks) else ("1" if value else ""),
+                            show_label=bool(self.panel_tracks))
+                return
+            if key == "lyrics":
+                w.setPlainText(value)
+            else:
+                w.setText(value)
+            w.setPlaceholderText(MIXED_HINT if mixed else "")
+            self.mark(w, "mixed" if mixed else "")
+        finally:
+            self._populating = was
+
+    def value_menu(self, key: str):
+        """Mp3tag's field dropdown: < keep >, < blank >, or one of the values the selected tracks have."""
+        if not self.panel_tracks:
+            return
+        w = self.widgets[key]
+        menu = QMenu(self)
+        orig = self.panel_orig.get(key, [])
+        if len(set(orig)) > 1:
+            menu.addAction(MIXED_HINT, lambda: self.restore_field(key))
+        menu.addAction(CLEARED_HINT, lambda: self.clear_field(key))
+        values = sorted({v for v in orig if v} | {t.tags[key] for t in self.panel_tracks if t.tags[key]},
+                        key=natural_key)
+        if values:
+            menu.addSeparator()
+            for v in values[:40]:
+                menu.addAction(v.replace("&", "&&"), lambda v=v: self.set_field(key, v))
+        menu.exec(w.mapToGlobal(w.rect().bottomLeft()))
+
+    def set_field(self, key: str, value: str):
+        w = self.widgets[key]
+        self._populating = True
+        try:
+            w.setText(value)
+        finally:
+            self._populating = False
+        self.on_field_edited(key, value)
+
+    def restore_field(self, key: str):
+        """< keep >: put back what each track had when it was selected."""
+        for t, v in zip(self.panel_tracks, self.panel_orig.get(key, [])):
+            t.tags[key] = v
+        self.show_field(key)
+        self.after_change(self.panel_tracks)
+
     def populate_art(self, tracks: list[Track]):
         self.art_label.setPixmap(QPixmap())
         if not tracks:
             self.art_label.setText(""); self.art_info.setText(""); return
-        if self.draft_art is not None:
-            if self.draft_art[0] == "remove":
+        if all(t.art_op is not None for t in tracks) and len({t.art_digest() for t in tracks}) == 1:
+            if tracks[0].art_op[0] == "remove":
                 self.art_label.setText("Will be\nremoved")
-                self.art_info.setText("not applied yet")
+                self.art_info.setText("unsaved")
                 return
-            self.show_pixmap(self.draft_art[2], "not applied yet")
+            self.show_pixmap(tracks[0].art_op[2], "unsaved")
             return
         digests = {t.art_digest() for t in tracks}
         if len(digests) > 1:
@@ -1038,14 +1112,14 @@ class MainWindow(QMainWindow):
     def on_field_edited(self, key: str, value: str):
         if self._populating or not self.panel_tracks:
             return
-        self.draft[key] = value
+        for t in self.panel_tracks:
+            t.tags[key] = value
         if key != "compilation":
             w = self.widgets[key]
             self.mark(w, "cleared" if value == "" else "edited")
             if value == "":
                 w.setPlaceholderText(CLEARED_HINT)
-        self.update_buttons()
-        self.update_status()
+        self.after_change(self.panel_tracks)
 
     def on_lyrics_changed(self):
         if not self._populating:
@@ -1062,45 +1136,19 @@ class MainWindow(QMainWindow):
             self._populating = False
         self.on_field_edited(key, "")
 
-    def apply_draft(self):
-        """Stage the drafted edits on the tracks shown in the panel (does not write files)."""
-        tracks = self.panel_tracks
-        if not tracks or not self.has_draft():
-            return
-        for t in tracks:
-            for k, v in self.draft.items():
-                t.tags[k] = v
-            if self.draft_art is not None:
-                if self.draft_art[0] == "set":
-                    t.set_art(self.draft_art[1], self.draft_art[2])
-                else:
-                    t.remove_art()
-        self.draft, self.draft_art = {}, None
-        self.refresh_tracks(tracks)
-        self.populate_panel(tracks)
-        self.update_status()
-        self.statusBar().showMessage(f"Applied to {len(tracks)} track(s). Click \"Save to files\" (⌘S) to write them.", 6000)
-
-    def discard_draft(self):
-        if self.has_draft():
-            self.populate_panel(self.panel_tracks)
-            self.update_status()
-
     def update_buttons(self):
-        draft = self.has_draft()
-        n = len(self.panel_tracks)
-        self.apply_btn.setEnabled(draft)
-        self.discard_btn.setEnabled(draft)
-        self.apply_btn.setText(f"Apply to {n} track{'s' if n != 1 else ''}" if n else "Apply")
-        self.save_btn.setEnabled(draft or bool(self.dirty_tracks()))
-        self.pending_label.setText("● Unapplied edits - click Apply" if draft else "")
+        n = len(self.dirty_tracks())
+        self.save_btn.setEnabled(bool(n))
+        self.save_btn.setText(f"Save {n} file{'s' if n != 1 else ''}" if n else "Save")
+        self.save_btn.updateGeometry()
+        self.revert_btn.setEnabled(any(t.is_dirty() for t in self.panel_tracks))
 
     def after_change(self, tracks):
         self.refresh_tracks(tracks)
         self.update_status()
         self.update_buttons()
 
-    # ---- cover art (drafted like everything else)
+    # ---- cover art (applied to the selected tracks right away, written on Save)
     def choose_cover(self):
         if not self.panel_tracks:
             return
@@ -1127,21 +1175,21 @@ class MainWindow(QMainWindow):
             buf = QBuffer(); buf.open(QIODevice.WriteOnly)
             img.convertToFormat(QImage.Format_RGB32).save(buf, "JPEG", 92)
             raw, mime = bytes(buf.data()), "image/jpeg"
-        self.draft_art = ("set", mime, raw)
+        for t in self.panel_tracks:
+            t.set_art(mime, raw)
         self.populate_art(self.panel_tracks)
-        self.update_buttons(); self.update_status()
+        self.after_change(self.panel_tracks)
 
     def remove_cover(self):
         if not self.panel_tracks:
             return
-        self.draft_art = ("remove",)
+        for t in self.panel_tracks:
+            t.remove_art()
         self.populate_art(self.panel_tracks)
-        self.update_buttons(); self.update_status()
+        self.after_change(self.panel_tracks)
 
     # ---- tools
     def need_selection(self) -> list[Track]:
-        if self.has_draft():
-            self.apply_draft()
         tracks = self.selected_tracks()
         if not tracks:
             QMessageBox.information(self, APP_NAME, "Select the tracks first (⌘A selects everything).")
@@ -1207,8 +1255,6 @@ class MainWindow(QMainWindow):
         return [t for t in self.tracks.values() if t.is_dirty()]
 
     def save_all(self) -> bool:
-        if self.has_draft():
-            self.apply_draft()
         dirty = self.dirty_tracks()
         if not dirty:
             return True
@@ -1218,6 +1264,7 @@ class MainWindow(QMainWindow):
             for t in dirty:
                 try:
                     t.save()
+                    t.size = t.path.stat().st_size
                 except Exception as exc:
                     errors.append(f"{t.path.name}: {exc}")
         finally:
@@ -1239,14 +1286,12 @@ class MainWindow(QMainWindow):
         for t in tracks:
             t.revert()
         self.populate_panel(tracks)
-        self.refresh_tracks(tracks)
-        self.update_status()
+        self.after_change(tracks)
 
     def remove_selected(self):
         rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
         if not rows:
             return
-        self.draft, self.draft_art = {}, None
         if any(self.track_at(r).is_dirty() for r in rows):
             if QMessageBox.question(self, APP_NAME, "Some of these tracks have unsaved changes. Remove them anyway?") != QMessageBox.Yes:
                 return
@@ -1263,20 +1308,20 @@ class MainWindow(QMainWindow):
 
     # ---- status / lifecycle
     def update_status(self):
-        n, sel, dirty = len(self.tracks), len(self.selected_tracks()), len(self.dirty_tracks())
-        parts = [f"{n} file{'s' if n != 1 else ''}"]
-        if sel:
-            parts.append(f"{sel} selected")
-        if self.has_draft():
-            parts.append("unapplied edits")
-        if dirty:
-            parts.append(f"{dirty} unsaved")
+        """Mp3tag-style totals: count (time | size) for the selection and for the whole list."""
+        def summary(tracks):
+            secs = sum(t.length for t in tracks)
+            size = sum(getattr(t, "size", 0) for t in tracks)
+            return f"{len(tracks)} ({fmt_duration(secs)} | {fmt_size(size)})"
+        sel, dirty = self.selected_tracks(), len(self.dirty_tracks())
+        self.stat_unsaved.setText(f"● {dirty} unsaved" if dirty else "")
+        self.stat_sel.setText(f"Selected: {summary(sel)}" if sel else "")
+        self.stat_total.setText(f"Total: {summary(list(self.tracks.values()))}")
         self.setWindowTitle(f"{APP_NAME}{' — ' + str(dirty) + ' unsaved' if dirty else ''}")
-        self.act_save.setEnabled(bool(dirty) or self.has_draft())
-        self.statusBar().showMessage("  ·  ".join(parts))
+        self.act_save.setEnabled(bool(dirty))
 
     def closeEvent(self, e):
-        if self.dirty_tracks() or self.has_draft():
+        if self.dirty_tracks():
             box = QMessageBox(self)
             box.setWindowTitle(APP_NAME)
             box.setText("You have changes that haven't been written to your files.")
