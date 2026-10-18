@@ -287,38 +287,141 @@ class RenameDialog(QDialog):
             self.table.setItem(i, 1, QTableWidgetItem(stem + t.path.suffix if stem else "(unchanged)"))
 
 
-class CompilationToggle(QWidget):
-    """Two big Yes / No buttons. Neither lit = the selected tracks differ."""
+class CompilationCheck(QCheckBox):
+    """Mp3tag's Compilation checkbox. A dash (partly checked) = the selected tracks differ."""
     chosen = Signal(str)          # "1" or ""
 
     def __init__(self):
-        super().__init__()
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        self.yes = FlatButton("Yes", None, "segment"); self.no = FlatButton("No", None, "segment")
-        self.mixed = QLabel(MULTI); self.mixed.setObjectName("mixedlabel")
-        for b in (self.yes, self.no):
-            b.setCheckable(True)
-            b.setMinimumWidth(56)
-        self.yes.clicked.connect(lambda: self._pick("1"))
-        self.no.clicked.connect(lambda: self._pick(""))
-        row.addWidget(Segmented(self.yes, self.no)); row.addWidget(self.mixed); row.addStretch(1)
-        self.set_state(None)
+        super().__init__("Compilation")
+        self.setToolTip("Players show these tracks as one album; each track keeps its own Artist")
+        self.clicked.connect(self._clicked)
 
-    def _pick(self, value):
-        self.set_state(value)
-        self.chosen.emit(value)
+    def _clicked(self, on: bool):
+        self.setTristate(False)
+        self.setChecked(on)
+        self.chosen.emit("1" if on else "")
 
     def set_state(self, value, show_label=True):
         """value: "1", "" or None (mixed / nothing selected)."""
-        self.yes.setChecked(value == "1")
-        self.no.setChecked(value == "")
-        self.mixed.setVisible(value is None and show_label)
+        self.setTristate(value is None and show_label)
+        self.setCheckState(Qt.PartiallyChecked if (value is None and show_label)
+                           else Qt.Checked if value == "1" else Qt.Unchecked)
+
+
+class DropArea(QWidget):
+    """The empty track list: a dashed box to drop music on, or click to choose files."""
+    clicked = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("dropzone")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAttribute(Qt.WA_Hover)
+        self.setCursor(Qt.PointingHandCursor)
+        lay = QVBoxLayout(self); lay.setSpacing(8)
+        self.icon = QLabel(); self.icon.setAlignment(Qt.AlignCenter)
+        self.title = QLabel("Drop music here"); self.title.setAlignment(Qt.AlignCenter); self.title.setObjectName("emptytitle")
+        self.detail = QLabel("Drag files or folders from Finder into this space\n"
+                             "FLAC · M4A · MP3 · OGG · OPUS · WAV · AIFF\n\nor click to choose files (⌘O)")
+        self.detail.setAlignment(Qt.AlignCenter); self.detail.setObjectName("muted")
+        lay.addStretch(1); lay.addWidget(self.icon); lay.addWidget(self.title); lay.addWidget(self.detail); lay.addStretch(1)
+
+    def mousePressEvent(self, e):
+        self.clicked.emit()
+
+
+class PreferencesDialog(QDialog):
+    """Preferences ▸ Appearance, with MacBee's settings: theme, accent colour, sidebar width (plus text size)."""
+    THEMES = [("system", "System"), ("dark", "Dark"), ("gray", "Medium Gray"), ("light", "Light")]
+
+    def __init__(self, win: "MainWindow"):
+        super().__init__(win)
+        self.win = win
+        self.setWindowTitle("Preferences")
+        self.setMinimumWidth(460)
+        lay = QVBoxLayout(self); lay.setContentsMargins(22, 18, 22, 18); lay.setSpacing(6)
+        head = QLabel("Appearance"); f = QFont(self.font()); f.setPointSizeF(f.pointSizeF() * 1.3); f.setBold(True)
+        head.setFont(f); lay.addWidget(head)
+
+        def section(title):
+            lay.addSpacing(12)
+            l = QLabel(title.upper()); l.setObjectName("section"); l.setFont(eyebrow_font(self.font())); lay.addWidget(l)
+
+        section("Theme")
+        self.theme_btns = {}
+        for key, label in self.THEMES:
+            b = FlatButton(label, None, "segment"); b.setCheckable(True)
+            b.clicked.connect(lambda _=False, k=key: self.pick_theme(k))
+            self.theme_btns[key] = b
+        lay.addWidget(Segmented(*self.theme_btns.values()), 0, Qt.AlignLeft)
+
+        section("Accent color")
+        row = QHBoxLayout(); row.setSpacing(10)
+        self.swatches = {}
+        for key, label, color in theme.ACCENT_CHOICES:
+            b = QToolButton(); b.setToolTip(label); b.setFixedSize(26, 26); b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, c=color: self.pick_accent(c))
+            self.swatches[color.lower()] = b; row.addWidget(b)
+        custom = QPushButton("Custom…"); custom.clicked.connect(self.custom_accent); custom.setAutoDefault(False)
+        self.custom_mark = QLabel("✓")
+        row.addSpacing(6); row.addWidget(custom); row.addWidget(self.custom_mark); row.addStretch(1)
+        lay.addLayout(row)
+        n = QLabel("Used for buttons, highlights and edited fields."); n.setObjectName("faint"); lay.addWidget(n)
+
+        section("Sidebar")
+        self.width_slider = self.slider(win.SIDEBAR_RANGE, win.sidebar_width, win.set_sidebar_width, "Narrow", "Wide")
+        n = QLabel("The width when the sidebar is expanded. Collapsed, it always shows icons only.")
+        n.setObjectName("faint"); n.setWordWrap(True); lay.addWidget(n)
+
+        section("Text size")
+        self.text_slider = self.slider((10, 28), win.font_pt, lambda v: win.change_font(v - win.font_pt), "Smaller", "Larger")
+        n = QLabel("Same as View ▸ Larger / Smaller Text (⌘+ / ⌘-)."); n.setObjectName("faint"); lay.addWidget(n)
+
+        lay.addSpacing(14)
+        close = QDialogButtonBox(QDialogButtonBox.Close); close.rejected.connect(self.accept)
+        lay.addWidget(close)
+        self.refresh()
+
+    def slider(self, rng, value, slot, lo, hi):
+        from PySide6.QtWidgets import QSlider
+        h = QHBoxLayout(); h.setSpacing(10)
+        s = QSlider(Qt.Horizontal); s.setRange(*rng); s.setValue(int(value))
+        s.valueChanged.connect(slot)
+        a, b = QLabel(lo), QLabel(hi)
+        for l in (a, b):
+            l.setObjectName("faint")
+        h.addWidget(a); h.addWidget(s, 1); h.addWidget(b)
+        self.layout().addLayout(h)
+        return s
+
+    def pick_theme(self, key):
+        self.win.set_theme(key)
+        self.refresh()
+
+    def pick_accent(self, color):
+        self.win.set_accent(color)
+        self.refresh()
+
+    def custom_accent(self):
+        self.win.pick_accent()
+        self.refresh()
+
+    def refresh(self):
+        for key, b in self.theme_btns.items():
+            b.setChecked(key == self.win.theme)
+        cur = self.win.accent.lower()
+        ring = theme.current.text_primary.name()
+        for color, b in self.swatches.items():
+            border = f"2px solid {ring}" if color == cur else "2px solid transparent"
+            b.setStyleSheet(f"QToolButton {{ background: {color}; border-radius: 13px; border: {border}; }}")
+        self.custom_mark.setVisible(cur not in self.swatches)
 
 
 # --------------------------------------------------------------------------- main window
 
 class MainWindow(QMainWindow):
+    SIDEBAR_RANGE = (170, 340)      # expanded sidebar width in points (MacBee's slider, scaled for TagBee's larger text)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_NAME)
@@ -332,6 +435,8 @@ class MainWindow(QMainWindow):
         self._sort_col, self._sort_order = None, Qt.AscendingOrder
         self.panel_tracks: list[Track] = []      # tracks currently shown in the editor panel
         self.panel_orig: dict[str, list[str]] = {}   # each field's values when the tracks were selected
+        self.draft: dict[str, str] = {}               # edits typed but not applied yet
+        self.draft_art = None                          # cover change not applied yet
 
         self.settings = QSettings("TagBee", "TagBee")
         self.migrate_old_settings()
@@ -346,6 +451,7 @@ class MainWindow(QMainWindow):
         self.tokens = theme.Theme.make(theme.DEFAULT_THEME, self.accent)
         self._build_ui()
         self._build_actions()
+        self.panel_scroll.viewport().installEventFilter(self)
         self.apply_theme()
         self.apply_font()
         hints = QGuiApplication.styleHints()
@@ -361,6 +467,11 @@ class MainWindow(QMainWindow):
         self.sidebar.setAttribute(Qt.WA_StyledBackground, True)
         sb = QVBoxLayout(self.sidebar); sb.setContentsMargins(8, 14, 8, 12); sb.setSpacing(2)
         self.sidebar_collapsed = self.settings.value("sidebarCollapsed", False, type=bool)
+        try:
+            self.sidebar_width = int(self.settings.value("sidebarWidth", 230))
+        except (TypeError, ValueError):
+            self.sidebar_width = 230
+        self.sidebar_width = max(self.SIDEBAR_RANGE[0], min(self.SIDEBAR_RANGE[1], self.sidebar_width))
         self.sidebar_rows: list[tuple[FlatButton, str]] = []
         self.sidebar_sections: list[QLabel] = []
 
@@ -435,23 +546,24 @@ class MainWindow(QMainWindow):
         except (ValueError, TypeError):
             pass
 
-        # empty state: big icon, bold title, quiet detail (like MacBee's "no folders yet" page)
-        empty = QWidget(); el = QVBoxLayout(empty); el.setSpacing(8)
-        self.empty_icon = QLabel(); self.empty_icon.setAlignment(Qt.AlignCenter)
-        self.empty_hint = QLabel("No tracks yet"); self.empty_hint.setAlignment(Qt.AlignCenter); self.empty_hint.setObjectName("emptytitle")
-        self.empty_detail = QLabel("Drag music files or folders here, or press ⌘O")
-        self.empty_detail.setAlignment(Qt.AlignCenter); self.empty_detail.setObjectName("muted")
-        el.addStretch(1); el.addWidget(self.empty_icon); el.addWidget(self.empty_hint); el.addWidget(self.empty_detail); el.addStretch(1)
-        self.stack = QStackedWidget()
+        # empty state: a dashed drop box; with tracks loaded, a quiet notice under the list
+        self.drop_area = DropArea()
+        self.drop_area.clicked.connect(self.add_files_dialog)
+        empty = QWidget(); el = QVBoxLayout(empty); el.setContentsMargins(24, 24, 24, 24)
+        el.addWidget(self.drop_area)
+        self.drop_note = QLabel("Drop more files or folders anywhere here to add them")
+        self.drop_note.setObjectName("faint"); self.drop_note.setAlignment(Qt.AlignCenter)
+        self.drop_note.setContentsMargins(0, 6, 0, 6)
+        listed = QWidget(); ll = QVBoxLayout(listed); ll.setContentsMargins(0, 0, 0, 0); ll.setSpacing(0)
+        ll.addWidget(self.table, 1); ll.addWidget(self.drop_note)
+        self.stack = QStackedWidget(); self.stack.setObjectName("center")
         self.stack.addWidget(empty)
-        self.stack.addWidget(self.table)
+        self.stack.addWidget(listed)
 
-        # ===== right: tag panel like Mp3tag's - one column of fields, label above each, cover at the bottom.
-        # Edits go straight onto the selected tracks (rows turn amber); Save writes them, Revert undoes them.
-        self.panel_title = QLabel()
-        self.panel_title.setWordWrap(True)
-        self.panel_title.setObjectName("paneltitle")
-        self.panel_hint = QLabel(); self.panel_hint.setWordWrap(True); self.panel_hint.setObjectName("muted")
+        # ===== right: tag panel laid out like Mp3tag's (label above each field, cover below).
+        # Typing drafts an edit; Apply puts it on the selected tracks; Commit to File writes them.
+        self.panel_title = QLabel(); self.panel_title.setObjectName("muted")
+        self.panel_title.setTextFormat(Qt.PlainText)
 
         self.widgets: dict[str, QWidget] = {}
         self.menu_actions: list[QAction] = []
@@ -459,6 +571,7 @@ class MainWindow(QMainWindow):
         def line(key):
             w = QLineEdit()
             w.textEdited.connect(lambda text, k=key: self.on_field_edited(k, text))
+            w.returnPressed.connect(self.apply_draft)
             a = w.addAction(QIcon(), QLineEdit.TrailingPosition)
             a.setToolTip("< keep >, < blank >, or a value from the selected tracks")
             a.triggered.connect(lambda _=False, k=key: self.value_menu(k))
@@ -466,93 +579,103 @@ class MainWindow(QMainWindow):
             self.widgets[key] = w
             return w
 
-        self.comp_combo = CompilationToggle()
-        self.comp_combo.chosen.connect(lambda v: self.on_field_edited("compilation", v))
-        self.widgets["compilation"] = self.comp_combo
+        self.comp_check = CompilationCheck()
+        self.comp_check.chosen.connect(lambda v: self.on_field_edited("compilation", v))
+        self.widgets["compilation"] = self.comp_check
 
         self.lyrics = QPlainTextEdit()
         self.lyrics.setFixedHeight(90)
         self.lyrics.textChanged.connect(self.on_lyrics_changed)
         self.widgets["lyrics"] = self.lyrics
 
-        fields = QVBoxLayout(); fields.setSpacing(7)
-
         def labelled(label, widget):
             cell = QWidget()
-            v = QVBoxLayout(cell); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(2)
-            lab = QLabel(label.upper()); lab.setObjectName("fieldlabel")
+            v = QVBoxLayout(cell); v.setContentsMargins(0, 0, 0, 0); v.setSpacing(3)
+            lab = QLabel(label + ":"); lab.setObjectName("taglabel")
             v.addWidget(lab); v.addWidget(widget)
             return cell
 
-        def add(label, widget):
-            fields.addWidget(labelled(label, widget))
+        def column(target):
+            def add(label, widget):
+                target.addWidget(labelled(label, widget))
 
-        def pair(a, wa, b, wb):
-            h = QHBoxLayout(); h.setSpacing(10)
-            h.addWidget(labelled(a, wa), 1); h.addWidget(labelled(b, wb), 1)
-            fields.addLayout(h)
+            def row(*cells):        # (label, widget, stretch) side by side
+                h = QHBoxLayout(); h.setSpacing(8)
+                for label, widget, stretch in cells:
+                    h.addWidget(labelled(label, widget) if label else widget, stretch)
+                target.addLayout(h)
+            return add, row
 
+        fields = QVBoxLayout(); fields.setSpacing(8)
+        add, row = column(fields)
         add("Title", line("title"))
         add("Artist", line("artist"))
         add("Album", line("album"))
-        add("Album Artist", line("albumartist"))
-        add("Compilation", self.comp_combo)
-        pair("Year", line("date"), "BPM", line("bpm"))
-        pair("Track", line("track"), "Total tracks", line("tracktotal"))
-        pair("Disc", line("disc"), "Total discs", line("disctotal"))
-        add("Genre", line("genre"))
-        add("Composer", line("composer"))
+        row(("Year", line("date"), 3), ("Track", line("track"), 3), ("Genre", line("genre"), 5))
         add("Comment", line("comment"))
-        add("Grouping", line("grouping"))
-        add("Copyright", line("copyright"))
-        add("Lyrics", self.lyrics)
+        add("Album Artist", line("albumartist"))
+        add("Composer", line("composer"))
+        disc = labelled("Disc Number", line("disc"))
+        h = QHBoxLayout(); h.setSpacing(12)
+        h.addWidget(disc, 3); h.addWidget(self.comp_check, 5, Qt.AlignBottom)
+        fields.addLayout(h)
 
-        sort_box = QGroupBox("Sort names (optional)")
-        sort_box.setCheckable(True); sort_box.setChecked(False)
-        sort_form = QFormLayout(sort_box)
-        for key in ("titlesort", "artistsort", "albumsort", "albumartistsort"):
-            sort_form.addRow(tagio.LABELS[key], line(key))
-        sort_inner = [sort_form.itemAt(i).widget() for i in range(sort_form.count())]
-        sort_box.toggled.connect(lambda on: [w.setVisible(on) for w in sort_inner if w])
-        sort_box.toggled.emit(False)
-
-        # cover, at the bottom like Mp3tag
+        # cover, full width like Mp3tag (right-click it to replace or remove)
         self.art_label = CoverLabel()
-        self.art_label.setFixedSize(160, 160)
         self.art_label.setAlignment(Qt.AlignCenter)
         self.art_label.setWordWrap(True)
-        self.art_label.setToolTip("Drop an image anywhere on the window to set the cover")
-        self.art_info = QLabel(); self.art_info.setObjectName("faint"); self.art_info.setWordWrap(True)
+        self.art_label.setToolTip("Drop an image on the window, or right-click, to change the cover")
+        self.art_label.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.art_label.customContextMenuRequested.connect(self.cover_menu)
+        self.art_info = QLabel(); self.art_info.setObjectName("faint")
         replace_btn = FlatButton("Replace…", "photo", "plain", "Choose a new cover image")
         replace_btn.clicked.connect(self.choose_cover)
         remove_btn = FlatButton("Remove", "trash", "plain", "Remove the cover")
         remove_btn.clicked.connect(self.remove_cover)
-        art_side = QVBoxLayout(); art_side.setSpacing(4)
-        art_side.addWidget(self.art_info); art_side.addWidget(replace_btn, 0, Qt.AlignLeft)
-        art_side.addWidget(remove_btn, 0, Qt.AlignLeft); art_side.addStretch(1)
-        art_row = QHBoxLayout(); art_row.setSpacing(12)
-        art_row.addWidget(self.art_label, 0, Qt.AlignTop); art_row.addLayout(art_side, 1)
-        cover_label = QLabel("COVER"); cover_label.setObjectName("fieldlabel")
+        art_row = QHBoxLayout(); art_row.setSpacing(4)
+        art_row.addWidget(self.art_info, 1); art_row.addWidget(replace_btn); art_row.addWidget(remove_btn)
 
-        panel_layout = QVBoxLayout(); panel_layout.setContentsMargins(14, 12, 14, 10); panel_layout.setSpacing(10)
-        panel_layout.addWidget(self.panel_title); panel_layout.addWidget(self.panel_hint)
+        # everything else TagBee edits, folded away below the cover
+        more = QGroupBox("More fields")
+        more.setCheckable(True); more.setChecked(self.settings.value("moreFields", False, type=bool))
+        more_inner = QWidget(); ml = QVBoxLayout(more_inner); ml.setContentsMargins(0, 4, 0, 0); ml.setSpacing(8)
+        add2, row2 = column(ml)
+        row2(("Total Tracks", line("tracktotal"), 1), ("Total Discs", line("disctotal"), 1), ("BPM", line("bpm"), 1))
+        add2("Grouping", line("grouping"))
+        add2("Copyright", line("copyright"))
+        add2("Lyrics", self.lyrics)
+        for key in ("titlesort", "artistsort", "albumsort", "albumartistsort"):
+            add2(tagio.LABELS[key], line(key))
+        mv = QVBoxLayout(more); mv.setContentsMargins(0, 0, 0, 0); mv.addWidget(more_inner)
+        more.toggled.connect(more_inner.setVisible)
+        more.toggled.connect(lambda on: self.settings.setValue("moreFields", on))
+        more_inner.setVisible(more.isChecked())
+
+        panel_layout = QVBoxLayout(); panel_layout.setContentsMargins(12, 10, 12, 10); panel_layout.setSpacing(10)
+        panel_layout.addWidget(self.panel_title)
         panel_layout.addLayout(fields)
-        panel_layout.addWidget(sort_box)
-        panel_layout.addSpacing(4)
-        panel_layout.addWidget(cover_label); panel_layout.addLayout(art_row)
+        panel_layout.addWidget(self.art_label)
+        panel_layout.addLayout(art_row)
+        panel_layout.addWidget(more)
         panel_layout.addStretch(1)
         self.panel = QWidget(); self.panel.setLayout(panel_layout); self.panel.setObjectName("inspectorPanel")
         scroll = QScrollArea(); scroll.setWidget(self.panel); scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.panel_scroll = scroll
 
-        # one save button (like Mp3tag's), plus Revert
-        self.revert_btn = FlatButton("Revert", "arrow.uturn.backward", "plain", "Undo unsaved changes on the selected tracks (⌘R)")
-        self.revert_btn.clicked.connect(self.revert_selected)
-        self.save_btn = FlatButton("Save", "square.and.arrow.down", "accent", "Write every changed track into its file (⌘S)")
+        # Apply · Revert · Commit to File
+        self.apply_btn = FlatButton("Apply", "checkmark", "capsule", "Put your edits on the selected tracks (⌘↩ or Return). Not written yet.")
+        self.apply_btn.setShortcut("Ctrl+Return")
+        self.apply_btn.clicked.connect(self.apply_draft)
+        self.revert_btn = FlatButton("Revert", "arrow.uturn.backward", "plain",
+                                     "Throw away edits, or undo the selected tracks' unsaved changes (⌘R)")
+        self.revert_btn.clicked.connect(self.revert)
+        self.save_btn = FlatButton("Commit to File", "square.and.arrow.down", "accent",
+                                   "Apply any edits and write every changed track into its file (⌘S)")
         self.save_btn.clicked.connect(self.save_all)
-        bar = QHBoxLayout(); bar.setContentsMargins(14, 10, 14, 12); bar.setSpacing(8)
-        bar.addWidget(self.revert_btn); bar.addStretch(1); bar.addWidget(self.save_btn)
+        bar = QHBoxLayout(); bar.setContentsMargins(12, 10, 12, 12); bar.setSpacing(6)
+        bar.addWidget(self.apply_btn); bar.addWidget(self.revert_btn); bar.addStretch(1); bar.addWidget(self.save_btn)
         self.right = QWidget(); self.right.setObjectName("inspector")
         self.right.setAttribute(Qt.WA_StyledBackground, True)
         rl = QVBoxLayout(self.right); rl.setContentsMargins(0, 0, 0, 0); rl.setSpacing(0)
@@ -619,8 +742,8 @@ class MainWindow(QMainWindow):
 
         self.act_add = act("Add Files…", self.add_files_dialog, QKeySequence.Open)
         self.act_add_folder = act("Add Folder…", self.add_folder_dialog, "Ctrl+Shift+O")
-        self.act_save = act("Save", self.save_all, QKeySequence.Save, "Write all changes into the original files")
-        self.act_revert = act("Revert Selected", self.revert_selected, "Ctrl+R", "Discard unsaved changes on the selected tracks")
+        self.act_save = act("Commit to File", self.save_all, QKeySequence.Save, "Write all changes into the original files")
+        self.act_revert = act("Revert", self.revert, "Ctrl+R", "Discard unsaved changes on the selected tracks")
         self.act_remove = act("Remove from List", self.remove_selected, QKeySequence.Delete, "Remove from this window (files aren't touched)")
         self.act_clear = act("Clear List", self.clear_list)
         self.act_comp = act("Make Compilation…", self.make_compilation, "Ctrl+K", "Set Album Artist + Compilation flag, keep track artists")
@@ -629,7 +752,7 @@ class MainWindow(QMainWindow):
         self.act_selall = act("Select All", self.select_all, QKeySequence.SelectAll)
         self.act_selnone = act("Select None", self.select_none, "Ctrl+Shift+A")
 
-        m = self.menuBar().addMenu("&File")
+        m = self.file_menu = self.menuBar().addMenu("&File")
         m.addActions([self.act_add, self.act_add_folder]); m.addSeparator()
         m.addAction(self.act_save); m.addSeparator()
         m.addActions([self.act_remove, self.act_clear])
@@ -671,6 +794,9 @@ class MainWindow(QMainWindow):
         m.addActions([bigger, smaller, reset])
         m.addSeparator()
         m.addAction(act("Show / Hide Sidebar", self.toggle_sidebar, "Meta+Ctrl+S"))
+        prefs = act("Preferences…", self.open_preferences, QKeySequence.Preferences)
+        prefs.setMenuRole(QAction.PreferencesRole)        # macOS puts it in the TagBee menu (⌘,)
+        self.file_menu.addSeparator(); self.file_menu.addAction(prefs)
 
         # Mp3tag-style totals on the right of the status bar
         sb = self.statusBar()
@@ -696,6 +822,8 @@ class MainWindow(QMainWindow):
     def set_theme(self, key: str):
         self.theme = key
         self.settings.setValue("theme", key)
+        if key in self.theme_actions:
+            self.theme_actions[key].setChecked(True)
         self.apply_theme()
 
     def set_accent(self, color: str):
@@ -742,8 +870,8 @@ class MainWindow(QMainWindow):
 
     def refresh_theme_icons(self):
         size = int(self.font_pt * 6.5)
-        self.empty_icon.setPixmap(symbol("music.note.list", self.tokens.text_tertiary, size, self.devicePixelRatioF()))
-        chevron = QIcon(symbol("chevron.down", self.tokens.text_tertiary, 14, self.devicePixelRatioF()))
+        self.drop_area.icon.setPixmap(symbol("arrow.down.to.line", self.tokens.text_tertiary, size, self.devicePixelRatioF()))
+        chevron = QIcon(symbol("chevron.down", self.tokens.accent_text, 14, self.devicePixelRatioF()))
         for a in self.menu_actions:
             a.setIcon(chevron)
 
@@ -766,18 +894,24 @@ class MainWindow(QMainWindow):
             self.table.setColumnWidth(i, int(w * scale))
         self.table.verticalHeader().setDefaultSectionSize(int(pt * 2.3))
         self.lyrics.setFixedHeight(int(pt * 7))
-        art = int(pt * 10)
-        self.art_label.setFixedSize(art, art)
-        self.right.setMinimumWidth(int(pt * 22))
+        self.right.setMinimumWidth(int(pt * 20))
+        self.size_cover()
         self.apply_sidebar()
         for row in range(self.table.rowCount()):   # bold flags are per-item fonts
             self.refresh_row(row)
         self.populate_art(self.panel_tracks)       # cover is drawn at the new size
 
-    def set_title_font(self):
-        """Big bold title for tracks; the "Select one or more tracks" prompt stays small."""
-        if hasattr(self, "title_fonts"):
-            self.panel_title.setFont(self.title_fonts[0] if self.panel_tracks else self.title_fonts[1])
+    def size_cover(self):
+        """The cover fills the tag panel's width, like Mp3tag."""
+        side = max(120, self.panel_scroll.viewport().width() - 24)
+        if self.art_label.width() != side:
+            self.art_label.setFixedSize(side, side)
+            self.populate_art(self.panel_tracks)
+
+    def eventFilter(self, obj, e):
+        if obj is self.panel_scroll.viewport() and e.type() == QEvent.Resize:
+            QTimer.singleShot(0, self.size_cover)
+        return super().eventFilter(obj, e)
 
     def apply_type_scale(self):
         """MacBee type scale, relative to the chosen text size. Re-run after a theme change."""
@@ -786,11 +920,13 @@ class MainWindow(QMainWindow):
         def sized(scale, weight=QFont.Normal):
             g = QFont(f); g.setPointSizeF(max(9.0, round(pt * scale, 1))); g.setWeight(weight); return g
         # MacBee type scale (at 13 pt: titles 20-30 bold, body 13, details 11, labels 10 spaced capitals)
-        self.title_fonts = (sized(1.4, QFont.Bold), sized(0.95, QFont.DemiBold))   # (tracks selected, nothing selected)
-        self.set_title_font()
+        self.panel_title.setFont(sized(0.85))
         self.brand_title.setFont(sized(1.15, QFont.Bold))
-        self.empty_hint.setFont(sized(1.85, QFont.Bold))
-        self.panel_hint.setFont(sized(0.85)); self.art_info.setFont(sized(0.8))
+        self.drop_area.title.setFont(sized(1.85, QFont.Bold))
+        self.art_info.setFont(sized(0.8)); self.drop_note.setFont(sized(0.8))
+        for l in self.findChildren(QLabel):
+            if l.objectName() == "taglabel":
+                l.setFont(sized(0.85))
         eyebrow = eyebrow_font(f)
         for l in self.findChildren(QLabel):
             if l.objectName() in ("section", "fieldlabel"):
@@ -889,10 +1025,21 @@ class MainWindow(QMainWindow):
     def dragEnterEvent(self, e):
         if e.mimeData().hasUrls():
             e.acceptProposedAction()
+            self.set_drag_highlight(True)
 
-    dragMoveEvent = dragEnterEvent
+    def dragMoveEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+
+    def dragLeaveEvent(self, e):
+        self.set_drag_highlight(False)
+
+    def set_drag_highlight(self, on: bool):
+        for w in (self.stack, self.drop_area):
+            self.mark(w, "drag" if on else "")
 
     def dropEvent(self, e):
+        self.set_drag_highlight(False)
         paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
         images = [p for p in paths if Path(p).suffix.lower() in IMAGE_EXTS]
         audio = [p for p in paths if p not in images]
@@ -965,6 +1112,14 @@ class MainWindow(QMainWindow):
         self.table.sortItems(col, self._sort_order)
 
     # ---- sidebar
+    def set_sidebar_width(self, w: int):
+        self.sidebar_width = int(w)
+        self.settings.setValue("sidebarWidth", self.sidebar_width)
+        self.apply_sidebar()
+
+    def open_preferences(self):
+        PreferencesDialog(self).exec()
+
     def toggle_sidebar(self):
         self.sidebar_collapsed = not self.sidebar_collapsed
         self.settings.setValue("sidebarCollapsed", self.sidebar_collapsed)
@@ -984,8 +1139,8 @@ class MainWindow(QMainWindow):
             w = self.sidebar_rows[0][0].sizeHint().width() + 16
             self.sidebar.setMinimumWidth(w); self.sidebar.setMaximumWidth(w)
         else:
-            self.sidebar.setMinimumWidth(int(pt * 14)); self.sidebar.setMaximumWidth(16777215)
-        left = self.sidebar.minimumWidth() if c else int(pt * 15.5)
+            self.sidebar.setMinimumWidth(self.sidebar_width); self.sidebar.setMaximumWidth(self.sidebar_width)
+        left = self.sidebar.minimumWidth()
         right = int(pt * 26)
         self.split.setSizes([left, max(300, self.width() - left - right), right])
 
@@ -995,7 +1150,12 @@ class MainWindow(QMainWindow):
         w.setProperty("state", state)
         w.style().unpolish(w); w.style().polish(w); w.update()
 
+    def has_draft(self) -> bool:
+        return bool(self.draft) or self.draft_art is not None
+
     def on_selection_changed(self):
+        # edits you didn't Apply are kept: they go onto the tracks you were editing (still not written)
+        self.apply_draft(repopulate=False)
         self.populate_panel(self.selected_tracks())
         self.update_status()
 
@@ -1005,15 +1165,13 @@ class MainWindow(QMainWindow):
             self.panel_tracks = list(tracks)
             self.panel_orig = {k: [t.tags[k] for t in tracks] for k in self.widgets}   # for "< keep >"
             self.panel.setEnabled(bool(tracks))
-            self.panel_hint.setText("")
+            self.draft, self.draft_art = {}, None
             if not tracks:
-                self.panel_title.setText("Select one or more tracks to edit")
+                self.panel_title.setText("Select tracks to edit their tags")
             elif len(tracks) == 1:
                 self.panel_title.setText(tracks[0].path.name)
             else:
-                self.panel_title.setText(f"{len(tracks)} tracks selected")
-                self.panel_hint.setText("< keep > means the tracks differ. Type to replace it on all of them.")
-            self.set_title_font()
+                self.panel_title.setText(f"{len(tracks)} tracks selected · < keep > = they differ")
             for key in self.widgets:
                 self.show_field(key)
             self.populate_art(tracks)
@@ -1071,16 +1229,22 @@ class MainWindow(QMainWindow):
         self.on_field_edited(key, value)
 
     def restore_field(self, key: str):
-        """< keep >: put back what each track had when it was selected."""
-        for t, v in zip(self.panel_tracks, self.panel_orig.get(key, [])):
-            t.tags[key] = v
+        """< keep >: drop the edit, so each track keeps its own value."""
+        self.draft.pop(key, None)
         self.show_field(key)
-        self.after_change(self.panel_tracks)
+        self.update_buttons()
 
     def populate_art(self, tracks: list[Track]):
         self.art_label.setPixmap(QPixmap())
         if not tracks:
             self.art_label.setText(""); self.art_info.setText(""); return
+        if self.draft_art is not None:
+            if self.draft_art[0] == "remove":
+                self.art_label.setText("Will be removed")
+                self.art_info.setText("not applied yet")
+            else:
+                self.show_pixmap(self.draft_art[2], "not applied yet")
+            return
         if all(t.art_op is not None for t in tracks) and len({t.art_digest() for t in tracks}) == 1:
             if tracks[0].art_op[0] == "remove":
                 self.art_label.setText("Will be\nremoved")
@@ -1112,14 +1276,13 @@ class MainWindow(QMainWindow):
     def on_field_edited(self, key: str, value: str):
         if self._populating or not self.panel_tracks:
             return
-        for t in self.panel_tracks:
-            t.tags[key] = value
+        self.draft[key] = value
         if key != "compilation":
             w = self.widgets[key]
             self.mark(w, "cleared" if value == "" else "edited")
             if value == "":
                 w.setPlaceholderText(CLEARED_HINT)
-        self.after_change(self.panel_tracks)
+        self.update_buttons()
 
     def on_lyrics_changed(self):
         if not self._populating:
@@ -1136,12 +1299,36 @@ class MainWindow(QMainWindow):
             self._populating = False
         self.on_field_edited(key, "")
 
+    def apply_draft(self, repopulate: bool = True):
+        """Apply: put the drafted edits on the tracks shown in the panel (files aren't written yet)."""
+        tracks = self.panel_tracks
+        if not tracks or not self.has_draft():
+            return
+        for t in tracks:
+            for k, v in self.draft.items():
+                t.tags[k] = v
+            if self.draft_art is not None:
+                t.set_art(self.draft_art[1], self.draft_art[2]) if self.draft_art[0] == "set" else t.remove_art()
+        self.draft, self.draft_art = {}, None
+        self.refresh_tracks(tracks)
+        if repopulate:
+            self.populate_panel(tracks)
+        self.update_status()
+
+    def revert(self):
+        """Revert: throw away edits not applied yet; with none, undo the selected tracks' unsaved changes."""
+        if self.has_draft():
+            self.populate_panel(self.panel_tracks)
+            self.update_status()
+        else:
+            self.revert_selected()
+
     def update_buttons(self):
+        draft = self.has_draft()
         n = len(self.dirty_tracks())
-        self.save_btn.setEnabled(bool(n))
-        self.save_btn.setText(f"Save {n} file{'s' if n != 1 else ''}" if n else "Save")
-        self.save_btn.updateGeometry()
-        self.revert_btn.setEnabled(any(t.is_dirty() for t in self.panel_tracks))
+        self.apply_btn.setEnabled(draft)
+        self.revert_btn.setEnabled(draft or any(t.is_dirty() for t in self.panel_tracks))
+        self.save_btn.setEnabled(draft or bool(n))
 
     def after_change(self, tracks):
         self.refresh_tracks(tracks)
@@ -1175,21 +1362,28 @@ class MainWindow(QMainWindow):
             buf = QBuffer(); buf.open(QIODevice.WriteOnly)
             img.convertToFormat(QImage.Format_RGB32).save(buf, "JPEG", 92)
             raw, mime = bytes(buf.data()), "image/jpeg"
-        for t in self.panel_tracks:
-            t.set_art(mime, raw)
+        self.draft_art = ("set", mime, raw)
         self.populate_art(self.panel_tracks)
-        self.after_change(self.panel_tracks)
+        self.update_buttons()
+
+    def cover_menu(self, pos):
+        if not self.panel_tracks:
+            return
+        menu = QMenu(self)
+        menu.addAction("Replace Cover…", self.choose_cover)
+        menu.addAction("Remove Cover", self.remove_cover)
+        menu.exec(self.art_label.mapToGlobal(pos))
 
     def remove_cover(self):
         if not self.panel_tracks:
             return
-        for t in self.panel_tracks:
-            t.remove_art()
+        self.draft_art = ("remove",)
         self.populate_art(self.panel_tracks)
-        self.after_change(self.panel_tracks)
+        self.update_buttons()
 
     # ---- tools
     def need_selection(self) -> list[Track]:
+        self.apply_draft()
         tracks = self.selected_tracks()
         if not tracks:
             QMessageBox.information(self, APP_NAME, "Select the tracks first (⌘A selects everything).")
@@ -1255,6 +1449,7 @@ class MainWindow(QMainWindow):
         return [t for t in self.tracks.values() if t.is_dirty()]
 
     def save_all(self) -> bool:
+        self.apply_draft()
         dirty = self.dirty_tracks()
         if not dirty:
             return True
@@ -1292,6 +1487,7 @@ class MainWindow(QMainWindow):
         rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
         if not rows:
             return
+        self.draft, self.draft_art = {}, None
         if any(self.track_at(r).is_dirty() for r in rows):
             if QMessageBox.question(self, APP_NAME, "Some of these tracks have unsaved changes. Remove them anyway?") != QMessageBox.Yes:
                 return
@@ -1318,10 +1514,10 @@ class MainWindow(QMainWindow):
         self.stat_sel.setText(f"Selected: {summary(sel)}" if sel else "")
         self.stat_total.setText(f"Total: {summary(list(self.tracks.values()))}")
         self.setWindowTitle(f"{APP_NAME}{' — ' + str(dirty) + ' unsaved' if dirty else ''}")
-        self.act_save.setEnabled(bool(dirty))
+        self.act_save.setEnabled(bool(dirty) or self.has_draft())
 
     def closeEvent(self, e):
-        if self.dirty_tracks():
+        if self.dirty_tracks() or self.has_draft():
             box = QMessageBox(self)
             box.setWindowTitle(APP_NAME)
             box.setText("You have changes that haven't been written to your files.")

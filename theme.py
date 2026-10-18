@@ -151,6 +151,14 @@ class Theme:
             QWidget#dropzone {{ border: 1px dashed {separator_strong}; border-radius: 10px; background: transparent; }}
             QWidget#dropzone:hover {{ border: 1px dashed {accent}; background: {hover_soft}; }}
             QLabel#droptitle {{ color: {text_secondary}; }}
+            QWidget#dropzone[state="drag"] {{ border: 2px dashed {accent}; background: {hover_soft}; }}
+            QStackedWidget#center[state="drag"] {{ border: 2px solid {accent}; }}
+            QLabel#taglabel {{ color: {text_secondary}; }}
+            QCheckBox::indicator {{ width: 15px; height: 15px; border-radius: 4px;
+                border: 1px solid {separator_strong}; background: {surface}; }}
+            QCheckBox::indicator:hover {{ border: 1px solid {accent}; }}
+            QCheckBox::indicator:checked {{ background: {accent}; border: 1px solid {accent}; }}
+            QCheckBox::indicator:indeterminate {{ background: {surface}; border: 1px dashed {warning}; }}
             QLabel#dropdetail {{ color: {text_tertiary}; }}
 
             /* ---- fields */

@@ -40,15 +40,21 @@ numbers the tracks. Then ⌘S.
 
 ## Layout
 Left: **Add Files / Add Folder** and tools (**Make Compilation, Auto-number, Rename Files**). The button at the top
-collapses it to a strip of icons (⌃⌘S). Drop files or folders anywhere on the window.
-Middle: the track list (File, #, Title, Artist, Album, Comp.). **Right-click the column headings** to show
-more columns (Album Artist, Year, Genre, Format, Time); your choice is remembered. Right: the tag panel, laid out
-like Mp3tag's (one column, cover at the bottom). Bottom: Mp3tag-style totals, `Selected: 3 (11:32 | 89.3 MB)`.
+collapses it to a strip of icons (⌃⌘S). Middle: a drop area when empty, then the track list; drop files or
+folders on it any time. **Right-click the column headings** to show more columns (Album Artist, Year, Genre,
+Format, Time). Right: the tag panel, laid out like Mp3tag's (Title, Artist, Album, Year/Track/Genre, Comment,
+Album Artist, Composer, Disc Number + Compilation, then the cover). The rest (totals, BPM, grouping, copyright,
+lyrics, sort names) is under **More fields**. Bottom: Mp3tag-style totals, `Selected: 3 (11:32 | 89.3 MB)`.
 
-## Editing: edit → Save
-Select tracks and type in the tag panel. Changes go onto the selected tracks right away (rows turn amber/bold),
-then **Save** (⌘S) writes every changed track into its file. **Revert** (⌘R) undoes unsaved changes on the
-selected tracks. No backups are made; files are changed in place.
+## Editing: Apply → Commit to File
+1. **Edit** fields in the tag panel (the edited field gets an accent outline).
+2. **Apply** (Return or ⌘↩) puts the edits on the selected tracks; their rows turn amber/bold. Selecting other
+   tracks also applies them, so nothing typed is lost.
+3. **Commit to File** (⌘S) writes every changed track into its file. No backups; files are changed in place.
+
+**Revert** (⌘R) throws away edits you haven't applied; with none, it undoes the selected tracks' unsaved changes.
+
+**Preferences** (⌘,): theme, accent colour and sidebar width (the same settings as MacBee), plus text size.
 
 - Multi-select edits many files at once. **< keep >** (orange dashed outline) means the tracks differ: type to
   replace it on all of them. Each field's **▾** menu offers < keep >, < blank > (clear it on all) or any value the
@@ -58,8 +64,8 @@ selected tracks. No backups are made; files are changed in place.
   (tick "Sort names" in the panel).
 - Cover art: shows the current cover; **Replace cover…** or drop an image file on the window
   with tracks selected; **Remove** deletes it.
-- **View ▸ Theme** (Dark / Medium Gray / Light / Match System), **View ▸ Accent Color** (Cyan, Violet, Orange,
-  Green, Pink or Custom…) and **View ▸ Larger / Smaller Text** (⌘+ / ⌘- / ⌘0). All are remembered.
+- **View ▸ Theme**, **View ▸ Accent Color** and **View ▸ Larger / Smaller Text** (⌘+ / ⌘- / ⌘0) are also in
+  Preferences. All are remembered.
 - Right-click a track for the tools, Show in Finder, Revert and Remove.
 - The Format column shows a quality badge (e.g. FLAC 24/96); hi-res files use the accent colour.
 - Tools: **Auto-number…**, **Rename Files…** (pattern like `%track% - %artist% - %title%`, with preview).
