@@ -31,6 +31,9 @@ First time on a Mac, paste this in Terminal (needs Python 3; macOS offers to ins
 
 That installs TagBee.app and makes the Update TagBee app. From Terminal: `Tools/tagbee.sh update`.
 
+To publish a version: `Tools/tagbee.sh release` (raises the version, puts `TagBee-<version>.dmg` on the
+Desktop and posts it as a GitHub Release).
+
 ## Making a compilation
 Select the tracks → **Tools ▸ Make Compilation…** (⌘K).
 Each track keeps its own **Artist**; **Album Artist** becomes "Various Artists" (editable) and the
