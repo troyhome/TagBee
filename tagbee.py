@@ -434,7 +434,7 @@ class PreferencesDialog(QDialog):
 
 
 class WandReport:
-    """What the Magic Wand did, shown when it finishes."""
+    """What Fix All did, shown when it finishes."""
 
     def __init__(self):
         self.covers: list[str] = []
@@ -445,7 +445,7 @@ class WandReport:
 
     def headline(self) -> str:
         n = len(self.covers)
-        text = (f"Magic Wand: {n} cover{'s' if n != 1 else ''} added, {self.saved} file{'s' if self.saved != 1 else ''} "
+        text = (f"Fix All: {n} cover{'s' if n != 1 else ''} added, {self.saved} file{'s' if self.saved != 1 else ''} "
                 f"saved, {len(self.renamed)} renamed")
         return text + (f", {len(self.errors)} problem{'s' if len(self.errors) != 1 else ''}." if self.errors else ".")
 
@@ -457,7 +457,7 @@ class WandReport:
         if self.no_cover:
             sections.append("ALBUMS LEFT AS THEY WERE\n" + "\n".join(self.no_cover))
         sections.append("FILES RENAMED\n" + ("\n".join(self.renamed) or "none"))
-        dlg = QDialog(parent); dlg.setWindowTitle("Magic Wand Report"); dlg.resize(620, 460)
+        dlg = QDialog(parent); dlg.setWindowTitle("Fix All Report"); dlg.resize(620, 460)
         lay = QVBoxLayout(dlg)
         head = QLabel(("Done with some problems. " if self.errors else "All done. ") + self.headline().split(": ", 1)[1])
         head.setWordWrap(True)
@@ -563,7 +563,7 @@ class MainWindow(QMainWindow):
         row("Make Compilation", "opticaldisc", self.make_compilation, "Set Album Artist + Compilation flag, keep each track's artist (⌘K)")
         row("Auto-number", "list.number", self.auto_number, "Number the selected tracks in list order")
         row("Rename Files", "character.cursor.ibeam", self.rename_files, "Rename files from their tags")
-        row("Magic Wand", "wand.and.stars", self.magic_wand,
+        row("Fix All", "wand.and.stars", self.magic_wand,
             "Every track: find covers (you choose), rename to the default style, and save, in one go")
         section("List")
         row("Select All", "checkmark.circle", self.select_all, "Select every track in the list (⌘A)")
@@ -824,7 +824,7 @@ class MainWindow(QMainWindow):
                                   "Search Apple Music and MusicBrainz for the album cover")
         self.act_number = act("Auto-number…", self.auto_number, None, "Number the selected tracks in list order")
         self.act_rename = act("Rename Files…", self.rename_files, None, "Rename files from their tags")
-        self.act_wand = act("Magic Wand…", self.magic_wand, "Ctrl+Shift+W",
+        self.act_wand = act("Fix All…", self.magic_wand, "Ctrl+Shift+W",
                             "Find covers, rename to the default style and save every track in one go")
         self.act_selall = act("Select All", self.select_all, QKeySequence.SelectAll)
         self.act_selnone = act("Select None", self.select_none, "Ctrl+Shift+A")
@@ -1502,6 +1502,25 @@ class MainWindow(QMainWindow):
         if not tracks:
             QMessageBox.information(self, APP_NAME, "Select the tracks first, then search for their cover.")
             return
+        self.apply_draft()
+        albums = self.album_groups(tracks)
+        if len(albums) > 1:
+            # several albums: one list of choices per album; the covers are put on each album's tracks
+            dlg = MagicWandDialog(self, albums, covers_only=True)
+            if dlg.exec() != QDialog.Accepted:
+                return
+            added = 0
+            for i, raw in dlg.covers.items():
+                cover = self.normalise_image(raw)
+                if cover:
+                    for t in albums[i]["tracks"]:
+                        t.set_art(*cover)
+                    added += 1
+            self.populate_panel(tracks)
+            self.after_change(tracks)
+            self.statusBar().showMessage(f"Covers chosen for {added} album{'s' if added != 1 else ''}. "
+                                         "Commit to File to save them.", 8000)
+            return
         def common(key):
             vals = [self.draft.get(key, t.tags[key]) for t in tracks]
             return max(set(vals), key=vals.count) if vals else ""
@@ -1517,11 +1536,21 @@ class MainWindow(QMainWindow):
     def magic_wand(self):
         """Select everything, find a cover per album (you choose), rename to the default style, save all."""
         if not self.tracks:
-            QMessageBox.information(self, APP_NAME, "Add some music first, then use the Magic Wand.")
+            QMessageBox.information(self, APP_NAME, "Add some music first, then use Fix All.")
             return
         self.table.selectAll()
         self.apply_draft()
         tracks = [self.track_at(r) for r in range(self.table.rowCount())]
+        albums = self.album_groups(tracks)
+        label, pattern = RENAME_PRESETS[0]
+        renames = [t for t in tracks if (stem := tagio.format_filename(pattern, t.tags)) and stem != t.path.stem]
+        dlg = MagicWandDialog(self, albums, len(renames), label)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        self._finish_fix_all(dlg, albums, tracks, pattern)
+
+    def album_groups(self, tracks):
+        """The tracks by album (album artist or artist + album), each with its current cover if they share one."""
         albums, index = [], {}
         for t in tracks:
             artist = t.tags["albumartist"] or t.tags["artist"]
@@ -1538,11 +1567,9 @@ class MainWindow(QMainWindow):
                 pix = QPixmap()
                 if pix.loadFromData(art[1]):
                     a["current"] = rounded(pix, 64, self.devicePixelRatioF())
-        label, pattern = RENAME_PRESETS[0]
-        renames = [t for t in tracks if (stem := tagio.format_filename(pattern, t.tags)) and stem != t.path.stem]
-        dlg = MagicWandDialog(self, albums, len(renames), label)
-        if dlg.exec() != QDialog.Accepted:
-            return
+        return albums
+
+    def _finish_fix_all(self, dlg, albums, tracks, pattern):
         report = WandReport()
         for i, a in enumerate(albums):
             raw = dlg.covers.get(i)
@@ -1561,7 +1588,7 @@ class MainWindow(QMainWindow):
                    and stem != t.path.stem] if do_rename else []
         steps = len(dirty) + len(renames)
         progress = QProgressDialog("Saving…", None, 0, max(1, steps), self)
-        progress.setWindowTitle("Magic Wand"); progress.setWindowModality(Qt.WindowModal)
+        progress.setWindowTitle("Fix All"); progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0); progress.setMinimumWidth(380)
         done = 0
         for n, t in enumerate(dirty, 1):

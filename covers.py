@@ -264,18 +264,20 @@ class AlbumCoverRow(QWidget):
 
 
 class MagicWandDialog(QDialog):
-    """Magic wand: find a cover for every album (you choose), optionally rename, then save everything."""
+    """Fix All (and Find for several albums): a cover per album, you choose; Fix All also renames and saves."""
 
-    def __init__(self, parent, albums: list[dict], rename_count: int, rename_label: str):
+    def __init__(self, parent, albums: list[dict], rename_count: int = 0, rename_label: str = "",
+                 covers_only: bool = False):
         super().__init__(parent)
-        self.setWindowTitle("Magic Wand")
+        self.setWindowTitle("Find Covers" if covers_only else "Fix All")
         self.resize(900, 640)
         self.albums = albums
         self.covers: dict[int, bytes] = {}       # album index -> chosen cover bytes
         self.search = None
         lay = QVBoxLayout(self)
         head = QLabel(f"{len(albums)} album{'s' if len(albums) != 1 else ''}: pick a cover for each "
-                      "(a match is pre-picked when the album title agrees), then click Do It All.")
+                      "(a match is pre-picked when the album title agrees), then click "
+                      + ("Use Covers." if covers_only else "Fix All."))
         head.setWordWrap(True)
         lay.addWidget(head)
         holder = QWidget(); rows = QVBoxLayout(holder); rows.setSpacing(0)
@@ -292,15 +294,17 @@ class MagicWandDialog(QDialog):
         self.do_rename = QCheckBox(f"Rename {rename_count} file{'s' if rename_count != 1 else ''} to “{rename_label}”"
                                    if rename_count else f"Rename files to “{rename_label}” (all already match)")
         self.do_rename.setChecked(rename_count > 0); self.do_rename.setEnabled(rename_count > 0)
-        lay.addWidget(self.do_covers); lay.addWidget(self.do_rename)
-        note = QLabel("Do It All also commits every other unsaved change to the files. No backups are made.")
-        note.setObjectName("faint"); lay.addWidget(note)
+        note = QLabel("Fix All also commits every other unsaved change to the files. No backups are made.")
+        note.setObjectName("faint")
+        for w in (self.do_covers, self.do_rename, note):
+            w.setVisible(not covers_only)
+            lay.addWidget(w)
         self.status = QLabel(); self.status.setObjectName("faint")
         self.bar = QProgressBar(); self.bar.setRange(0, len(albums)); self.bar.setTextVisible(False)
         self.bar.setFixedHeight(6)
         lay.addWidget(self.status); lay.addWidget(self.bar)
         box = QDialogButtonBox(QDialogButtonBox.Cancel)
-        self.go = box.addButton("Do It All", QDialogButtonBox.AcceptRole)
+        self.go = box.addButton("Use Covers" if covers_only else "Fix All", QDialogButtonBox.AcceptRole)
         box.accepted.connect(self.start); box.rejected.connect(self.reject)
         lay.addWidget(box)
         self._next = 0

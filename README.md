@@ -34,8 +34,8 @@ That installs TagBee.app and makes the Update TagBee app. From Terminal: `Tools/
 To publish a version: `Tools/tagbee.sh release` (raises the version, puts `TagBee-<version>.dmg` on the
 Desktop and posts it as a GitHub Release).
 
-## Magic Wand
-**Tools ▸ Magic Wand…** (⇧⌘W, or the sidebar) does everything in one go for every loaded track: it finds covers
+## Fix All
+**Tools ▸ Fix All…** (⇧⌘W, or the sidebar) does everything in one go for every loaded track: it finds covers
 online for each album and lets you pick one per album (a match is pre-picked only when the title agrees; None
 leaves an album alone), renames files to the default style (Title - Artist - Track) where they differ, and
 commits all changes to the files.
@@ -72,7 +72,8 @@ Album Artist, Composer, Disc Number + Compilation, **More fields** for the rest,
   (tick "Sort names" in the panel).
 - Cover art: shows the current cover; **Replace cover…** or drop an image file on the window
   with tracks selected; **Remove** deletes it.
-  **Find** (or Tools ▸ Find Cover Online…, ⇧⌘F) searches Apple Music and MusicBrainz for the album's cover;
+  **Find** (or Tools ▸ Find Cover Online…, ⇧⌘F) searches Apple Music and MusicBrainz for the album's cover
+  (with several albums selected, it shows a list of choices per album);
   double-click one to use it, then Apply and Commit to File.
 - **View ▸ Theme**, **View ▸ Accent Color** and **View ▸ Larger / Smaller Text** (⌘+ / ⌘- / ⌘0) are also in
   Preferences. All are remembered.
