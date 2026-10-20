@@ -69,7 +69,7 @@ build_standalone() {
 build_launcher() {
   rm -rf dist.nosync/TagBee.app; mkdir -p dist.nosync/TagBee.app/Contents/MacOS dist.nosync/TagBee.app/Contents/Resources
   mkdir -p "$APP_SUPPORT"
-  cp tagbee.py tagio.py theme.py widgets.py requirements.txt icon.png "$APP_SUPPORT/"
+  cp tagbee.py tagio.py theme.py widgets.py covers.py requirements.txt icon.png "$APP_SUPPORT/"
   rm -rf "$APP_SUPPORT/icons"; cp -R icons "$APP_SUPPORT/icons"
   "$PY" -m venv "$APP_SUPPORT/.venv" \
     && "$APP_SUPPORT/.venv/bin/python" -m pip install --quiet --upgrade pip \

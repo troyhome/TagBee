@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 import tagio
 import theme
 from tagio import Track
+from covers import CoverSearchDialog
 from widgets import FieldBox, FlatButton, Segmented, eyebrow_font, symbol
 
 APP_NAME = "TagBee"
@@ -647,12 +648,14 @@ class MainWindow(QMainWindow):
         self.art_label.customContextMenuRequested.connect(self.cover_menu)
         self.art_info = QLabel(); self.art_info.setObjectName("faint")
         self.art_info.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # never widens the panel
+        find_btn = FlatButton("Find", "magnifyingglass", "plain", "Search online for this album's cover")
+        find_btn.clicked.connect(self.find_cover_online)
         replace_btn = FlatButton("Replace…", "photo", "plain", "Choose a new cover image")
         replace_btn.clicked.connect(self.choose_cover)
         remove_btn = FlatButton("Remove", "trash", "plain", "Remove the cover")
         remove_btn.clicked.connect(self.remove_cover)
         art_row = QHBoxLayout(); art_row.setSpacing(2)
-        art_row.addWidget(self.art_info, 1); art_row.addWidget(replace_btn); art_row.addWidget(remove_btn)
+        art_row.addWidget(self.art_info, 1); art_row.addWidget(find_btn); art_row.addWidget(replace_btn); art_row.addWidget(remove_btn)
 
         # everything else TagBee edits, folded away under the main fields (the cover stays last)
         self.more_btn = FlatButton("More fields", "chevron.right", "plain", "Totals, BPM, grouping, copyright, lyrics, sort names")
@@ -774,6 +777,8 @@ class MainWindow(QMainWindow):
         self.act_remove = act("Remove from List", self.remove_selected, QKeySequence.Delete, "Remove from this window (files aren't touched)")
         self.act_clear = act("Clear List", self.clear_list)
         self.act_comp = act("Make Compilation…", self.make_compilation, "Ctrl+K", "Set Album Artist + Compilation flag, keep track artists")
+        self.act_find_cover = act("Find Cover Online…", self.find_cover_online, "Ctrl+Shift+F",
+                                  "Search Apple Music and MusicBrainz for the album cover")
         self.act_number = act("Auto-number…", self.auto_number, None, "Number the selected tracks in list order")
         self.act_rename = act("Rename Files…", self.rename_files, None, "Rename files from their tags")
         self.act_selall = act("Select All", self.select_all, QKeySequence.SelectAll)
@@ -786,7 +791,7 @@ class MainWindow(QMainWindow):
         m = self.menuBar().addMenu("&Edit")
         m.addActions([self.act_selall, self.act_selnone, self.act_revert])
         m = self.menuBar().addMenu("&Tools")
-        m.addActions([self.act_comp, self.act_number, self.act_rename])
+        m.addActions([self.act_comp, self.act_number, self.act_rename, self.act_find_cover])
 
         m = self.menuBar().addMenu("&View")
         theme_menu = m.addMenu("Theme")
@@ -1413,6 +1418,29 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.warning(self, APP_NAME, f"Couldn't read the image:\n{exc}")
             return
+        self.set_cover_bytes(raw)
+
+    def find_cover_online(self):
+        """Search Apple Music and MusicBrainz for the selected tracks' album cover."""
+        tracks = self.panel_tracks
+        if not tracks:
+            QMessageBox.information(self, APP_NAME, "Select the tracks first, then search for their cover.")
+            return
+        def common(key):
+            vals = [self.draft.get(key, t.tags[key]) for t in tracks]
+            return max(set(vals), key=vals.count) if vals else ""
+        artist = common("albumartist")
+        if not artist or artist.lower() in ("various artists", "various"):
+            artist = "" if common("compilation") else common("artist")
+        query = " ".join(x for x in (artist, common("album")) if x).strip() or tracks[0].path.stem
+        dlg = CoverSearchDialog(self, query)
+        if dlg.exec() == QDialog.Accepted and dlg.result:
+            self.set_cover_bytes(dlg.result)
+            self.statusBar().showMessage("Cover found. Apply, then Commit to File, to save it.", 6000)
+
+    def set_cover_bytes(self, raw: bytes):
+        if not self.panel_tracks:
+            return
         img = QImage.fromData(raw)
         if img.isNull():
             QMessageBox.warning(self, APP_NAME, "That file isn't a readable image.")
@@ -1431,6 +1459,7 @@ class MainWindow(QMainWindow):
         if not self.panel_tracks:
             return
         menu = QMenu(self)
+        menu.addAction("Find Cover Online…", self.find_cover_online)
         menu.addAction("Replace Cover…", self.choose_cover)
         menu.addAction("Remove Cover", self.remove_cover)
         menu.exec(self.art_label.mapToGlobal(pos))

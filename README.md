@@ -66,6 +66,8 @@ Album Artist, Composer, Disc Number + Compilation, **More fields** for the rest,
   (tick "Sort names" in the panel).
 - Cover art: shows the current cover; **Replace cover…** or drop an image file on the window
   with tracks selected; **Remove** deletes it.
+  **Find** (or Tools ▸ Find Cover Online…, ⇧⌘F) searches Apple Music and MusicBrainz for the album's cover;
+  double-click one to use it, then Apply and Commit to File.
 - **View ▸ Theme**, **View ▸ Accent Color** and **View ▸ Larger / Smaller Text** (⌘+ / ⌘- / ⌘0) are also in
   Preferences. All are remembered.
 - Right-click a track for the tools, Show in Finder, Revert and Remove.
@@ -78,6 +80,7 @@ Album Artist, Composer, Disc Number + Compilation, **More fields** for the rest,
 ## Files
 - `tagbee.py` - the app window
 - `theme.py` - every colour (MacBee's theme tokens: background, surface, accent…) and the stylesheet
+- `covers.py` - online cover search (Apple Music / iTunes and MusicBrainz Cover Art Archive)
 - `tagio.py` - reading/writing tags for each format (no GUI)
 - `widgets.py` - MacBee-style controls: sidebar rows, flat icon buttons, capsules, Yes/No switch
 - `make_icon.py` - draws `icon.png` in MacBee's icon style
