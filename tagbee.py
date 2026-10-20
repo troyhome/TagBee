@@ -1138,6 +1138,8 @@ class MainWindow(QMainWindow):
         types = ", ".join(f'"{e.lstrip(".")}"' for e in sorted(tagio.SUPPORTED_EXTS))
         script = f"""
             ObjC.import("AppKit");
+            // a real (Dock-less) app, so the panel can take clicks without hiding itself
+            $.NSApplication.sharedApplication.setActivationPolicy($.NSApplicationActivationPolicyAccessory);
             $.NSApplication.sharedApplication.activateIgnoringOtherApps(true);
             var p = $.NSOpenPanel.openPanel;
             p.canChooseFiles = true; p.canChooseDirectories = true; p.allowsMultipleSelection = true;
@@ -1145,6 +1147,7 @@ class MainWindow(QMainWindow):
             p.message = "Choose music files, folders, or both";
             p.prompt = "Add";
             p.level = $.NSModalPanelWindowLevel;      // above TagBee's window (the panel belongs to another process)
+            p.hidesOnDeactivate = false;
             p.setContentSize($.NSMakeSize(820, 520));
             p.center;
             p.makeKeyAndOrderFront(null);
