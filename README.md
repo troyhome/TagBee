@@ -42,7 +42,7 @@ Players then show one album instead of one album per artist. Optionally sets the
 numbers the tracks. Then ⌘S.
 
 ## Layout
-Left: **Add Files / Add Folder** and tools (**Make Compilation, Auto-number, Rename Files**). The button at the top
+Left: **Add Files** (pick files, folders, or both) / **Add Folder** and tools (**Make Compilation, Auto-number, Rename Files**). The button at the top
 collapses it to a strip of icons (⌃⌘S). Middle: a drop area when empty, then the track list; drop files or
 folders on it any time. **Right-click the column headings** to show more columns (Album Artist, Year, Genre,
 Format, Time). Right: the tag panel, laid out like Mp3tag's (Title, Artist, Album, Year/Track/Genre, Comment,

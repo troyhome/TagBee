@@ -516,7 +516,7 @@ class MainWindow(QMainWindow):
             sb.addSpacing(12); sb.addWidget(l)
             self.sidebar_sections.append(l)
 
-        row("Add Files…", "doc.badge.plus", self.add_files_dialog, "Choose audio files (⌘O)")
+        row("Add Files…", "doc.badge.plus", self.add_files_dialog, "Choose audio files and/or folders (⌘O)")
         row("Add Folder…", "folder.badge.plus", self.add_folder_dialog, "Add every audio file in a folder (⇧⌘O)")
         section("Tools")
         row("Make Compilation", "opticaldisc", self.make_compilation, "Set Album Artist + Compilation flag, keep each track's artist (⌘K)")
@@ -1077,10 +1077,40 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Added {n} file{'s' if n != 1 else ''}.", 5000)
 
     def add_files_dialog(self):
-        exts = " ".join(f"*{e}" for e in sorted(tagio.SUPPORTED_EXTS))
-        files, _ = QFileDialog.getOpenFileNames(self, "Add audio files", "", f"Audio files ({exts})")
-        if files:
-            self.add_paths(files)
+        """Choose any mix of audio files and folders in one Finder panel (Qt's own dialog does one or the other)."""
+        picked = self.mac_open_panel()
+        if picked is None:      # panel unavailable: fall back to Qt's files-only dialog
+            exts = " ".join(f"*{e}" for e in sorted(tagio.SUPPORTED_EXTS))
+            picked, _ = QFileDialog.getOpenFileNames(self, "Add audio files", "", f"Audio files ({exts})")
+        if picked:
+            self.add_paths(picked)
+
+    def mac_open_panel(self):
+        """macOS open panel that accepts files and folders together. Returns paths, [] if cancelled, None on failure."""
+        if sys.platform != "darwin":
+            return None
+        types = ", ".join(f'"{e.lstrip(".")}"' for e in sorted(tagio.SUPPORTED_EXTS))
+        script = f"""
+            ObjC.import("AppKit");
+            $.NSApplication.sharedApplication.activateIgnoringOtherApps(true);
+            var p = $.NSOpenPanel.openPanel;
+            p.canChooseFiles = true; p.canChooseDirectories = true; p.allowsMultipleSelection = true;
+            p.allowedFileTypes = $([{types}]);
+            p.message = "Choose music files, folders, or both";
+            p.prompt = "Add";
+            var out = [];
+            if (p.runModal == 1) {{ var u = p.URLs; for (var i = 0; i < u.count; i++) out.push(u.objectAtIndex(i).path.js); }}
+            out.join("\\n");
+        """
+        try:
+            r = subprocess.run(["osascript", "-l", "JavaScript", "-e", script], capture_output=True, text=True)
+        except OSError:
+            return None
+        finally:
+            self.raise_(); self.activateWindow()
+        if r.returncode != 0:
+            return None
+        return [line for line in r.stdout.strip().split("\n") if line]
 
     def add_folder_dialog(self):
         d = QFileDialog.getExistingDirectory(self, "Add folder")
