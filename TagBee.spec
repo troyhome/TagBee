@@ -14,7 +14,7 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "TagBee",
         "CFBundleDisplayName": "TagBee",
-        "CFBundleShortVersionString": "1.0",
+        "CFBundleShortVersionString": "1.1",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "11.0",
         "CFBundleDocumentTypes": [{
