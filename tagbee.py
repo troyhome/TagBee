@@ -1144,6 +1144,10 @@ class MainWindow(QMainWindow):
             p.allowedFileTypes = $([{types}]);
             p.message = "Choose music files, folders, or both";
             p.prompt = "Add";
+            p.level = $.NSModalPanelWindowLevel;      // above TagBee's window (the panel belongs to another process)
+            p.setContentSize($.NSMakeSize(820, 520));
+            p.center;
+            p.makeKeyAndOrderFront(null);
             var out = [];
             if (p.runModal == 1) {{ var u = p.URLs; for (var i = 0; i < u.count; i++) out.push(u.objectAtIndex(i).path.js); }}
             out.join("\\n");
