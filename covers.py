@@ -267,7 +267,7 @@ class MagicWandDialog(QDialog):
     """Fix All (and Find for several albums): a cover per album, you choose; Fix All also renames and saves."""
 
     def __init__(self, parent, albums: list[dict], rename_count: int = 0, rename_label: str = "",
-                 covers_only: bool = False):
+                 covers_only: bool = False, duplicate_count: int = 0, lyrics_count: int = 0):
         super().__init__(parent)
         self.setWindowTitle("Find Covers" if covers_only else "Fix All")
         self.resize(900, 640)
@@ -294,9 +294,18 @@ class MagicWandDialog(QDialog):
         self.do_rename = QCheckBox(f"Rename {rename_count} file{'s' if rename_count != 1 else ''} to “{rename_label}”"
                                    if rename_count else f"Rename files to “{rename_label}” (all already match)")
         self.do_rename.setChecked(rename_count > 0); self.do_rename.setEnabled(rename_count > 0)
-        note = QLabel("Fix All also commits every other unsaved change to the files. No backups are made.")
-        note.setObjectName("faint")
-        for w in (self.do_covers, self.do_rename, note):
+        self.do_duplicates = QCheckBox(
+            f"Move {duplicate_count} duplicate cop{'ies' if duplicate_count != 1 else 'y'} to the Trash (keeps the best-quality one)"
+            if duplicate_count else "Remove duplicates (none found)")
+        self.do_duplicates.setChecked(duplicate_count > 0); self.do_duplicates.setEnabled(duplicate_count > 0)
+        self.do_lyrics = QCheckBox(
+            f"Find lyrics online for {lyrics_count} song{'s' if lyrics_count != 1 else ''} without them (also saves .lrc files)"
+            if lyrics_count else "Find lyrics (every song already has them)")
+        self.do_lyrics.setChecked(lyrics_count > 0); self.do_lyrics.setEnabled(lyrics_count > 0)
+        note = QLabel("Fix All also commits every other unsaved change to the files. No backups are made; "
+                      "duplicates go to the Trash, so you can put them back.")
+        note.setObjectName("faint"); note.setWordWrap(True)
+        for w in (self.do_duplicates, self.do_covers, self.do_lyrics, self.do_rename, note):
             w.setVisible(not covers_only)
             lay.addWidget(w)
         self.status = QLabel(); self.status.setObjectName("faint")

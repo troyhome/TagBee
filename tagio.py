@@ -567,7 +567,10 @@ def rename_track(track: Track, new_stem: str) -> Path:
         target = track.path.with_name(f"{new_stem} ({n}){ext}")
         n += 1
     if target != track.path:
+        old_lrc = track.path.with_suffix(".lrc")
         track.path.rename(target)  # also handles case-only renames on macOS
+        if old_lrc.exists() and not target.with_suffix(".lrc").exists():
+            old_lrc.rename(target.with_suffix(".lrc"))   # keep a lyrics file next to its song
         track.path = target
     return target
 

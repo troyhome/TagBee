@@ -34,9 +34,16 @@ That installs TagBee.app and makes the Update TagBee app. From Terminal: `Tools/
 To publish a version: `Tools/tagbee.sh release` (raises the version, puts `TagBee-<version>.dmg` on the
 Desktop and posts it as a GitHub Release).
 
+## Remove Duplicates and Find Lyrics
+**Tools ▸ Remove Duplicates…** finds songs loaded more than once (same artist and title, lengths within 3 s),
+keeps the best-quality copy (lossless, then bit depth / sample rate, then bitrate) and moves the ticked extra
+copies to the Trash. **Tools ▸ Find Lyrics…** (⇧⌘L) looks up lyrics on LRCLIB for the selected songs (or all);
+they're added to the songs and written on Commit to File, and time-synced lyrics are also saved as a `.lrc` file
+next to each song (renames move it along).
+
 ## Fix All
 **Tools ▸ Fix All…** (⇧⌘W, or the sidebar) does everything in one go for every loaded track: it finds covers
-online for each album and lets you pick one per album (a match is pre-picked only when the title agrees; None
+online for each album and lets you pick one per album, can move duplicates to the Trash and find lyrics, (a match is pre-picked only when the title agrees; None
 leaves an album alone), renames files to the default style (Title - Artist - Track) where they differ, and
 commits all changes to the files.
 
@@ -87,6 +94,7 @@ Album Artist, Composer, Disc Number + Compilation, **More fields** for the rest,
 ## Files
 - `tagbee.py` - the app window
 - `theme.py` - every colour (MacBee's theme tokens: background, surface, accent…) and the stylesheet
+- `lyrics.py` - online lyrics (LRCLIB) and duplicate finding
 - `covers.py` - online cover search (Apple Music / iTunes and MusicBrainz Cover Art Archive)
 - `tagio.py` - reading/writing tags for each format (no GUI)
 - `widgets.py` - MacBee-style controls: sidebar rows, flat icon buttons, capsules, Yes/No switch

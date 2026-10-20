@@ -12,7 +12,7 @@ from pathlib import Path
 
 import json
 import subprocess
-from PySide6.QtCore import QRectF, QBuffer, QByteArray, QEasingCurve, QEvent, QIODevice, QSettings, QTimer, QVariantAnimation, Qt, Signal
+from PySide6.QtCore import QFile, QRectF, QBuffer, QByteArray, QEasingCurve, QEvent, QIODevice, QSettings, QTimer, QVariantAnimation, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QFont, QGuiApplication, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
@@ -26,6 +26,7 @@ import tagio
 import theme
 from tagio import Track
 from covers import CoverSearchDialog, MagicWandDialog
+from lyrics import LyricsFinder, find_duplicates, quality_score
 from widgets import FieldBox, FlatButton, Segmented, eyebrow_font, symbol
 
 APP_NAME = "TagBee"
@@ -433,6 +434,52 @@ class PreferencesDialog(QDialog):
         self.custom_mark.setVisible(cur not in self.swatches)
 
 
+class DuplicatesDialog(QDialog):
+    """Each set of duplicates, best copy first. Ticked copies go to the Trash."""
+
+    def __init__(self, parent, groups):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
+        self.setWindowTitle("Remove Duplicates")
+        self.resize(820, 520)
+        lay = QVBoxLayout(self)
+        extra = sum(len(g) - 1 for g in groups)
+        head = QLabel(f"{len(groups)} song{'s' if len(groups) != 1 else ''} loaded more than once. The best-quality "
+                      "copy is kept; ticked copies are moved to the Trash (you can put them back from there).")
+        head.setWordWrap(True); lay.addWidget(head)
+        self.tree = QTreeWidget(); self.tree.setHeaderLabels(["File", "Quality", "Time", "Folder"])
+        self.tree.setRootIsDecorated(True); self.tree.setAlternatingRowColors(False)
+        self.items = []
+        for g in groups:
+            top = QTreeWidgetItem([f"{g[0].tags['artist']} - {g[0].tags['title']}  ({len(g)} copies)"])
+            f = top.font(0); f.setBold(True); top.setFont(0, f)
+            self.tree.addTopLevelItem(top)
+            for i, t in enumerate(g):
+                it = QTreeWidgetItem([t.path.name, t.quality, fmt_time(t.length), str(t.path.parent)])
+                it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+                it.setCheckState(0, Qt.Unchecked if i == 0 else Qt.Checked)
+                it.setToolTip(0, "Best copy (kept)" if i == 0 else "Extra copy")
+                top.addChild(it)
+                self.items.append((it, t))
+            top.setExpanded(True)
+        for c, w in enumerate((330, 110, 60)):
+            self.tree.setColumnWidth(c, w)
+        lay.addWidget(self.tree, 1)
+        box = QDialogButtonBox(QDialogButtonBox.Cancel)
+        self.go = box.addButton("Move to Trash", QDialogButtonBox.AcceptRole)
+        box.accepted.connect(self.accept); box.rejected.connect(self.reject)
+        lay.addWidget(box)
+        self.tree.itemChanged.connect(lambda *_: self.update_button())
+        self.update_button()
+
+    def chosen(self) -> list:
+        return [t for it, t in self.items if it.checkState(0) == Qt.Checked]
+
+    def update_button(self):
+        n = len(self.chosen())
+        self.go.setText(f"Move {n} to Trash"); self.go.setEnabled(bool(n))
+
+
 class WandReport:
     """What Fix All did, shown when it finishes."""
 
@@ -442,18 +489,28 @@ class WandReport:
         self.renamed: list[str] = []
         self.errors: list[str] = []
         self.saved = 0
+        self.trashed: list[str] = []
+        self.lyrics_found: list[str] = []
+        self.lyrics_missing: list[str] = []
 
     def headline(self) -> str:
         n = len(self.covers)
-        text = (f"Fix All: {n} cover{'s' if n != 1 else ''} added, {self.saved} file{'s' if self.saved != 1 else ''} "
-                f"saved, {len(self.renamed)} renamed")
+        text = (f"Fix All: {n} cover{'s' if n != 1 else ''} added, {len(self.lyrics_found)} lyrics found, "
+                f"{len(self.trashed)} duplicate{'s' if len(self.trashed) != 1 else ''} trashed, "
+                f"{self.saved} file{'s' if self.saved != 1 else ''} saved, {len(self.renamed)} renamed")
         return text + (f", {len(self.errors)} problem{'s' if len(self.errors) != 1 else ''}." if self.errors else ".")
 
     def show(self, parent):
         sections = []
         if self.errors:
             sections.append("PROBLEMS\n" + "\n".join(self.errors))
+        if self.trashed:
+            sections.append("DUPLICATES MOVED TO THE TRASH\n" + "\n".join(self.trashed))
         sections.append("COVERS ADDED\n" + ("\n".join(self.covers) or "none"))
+        if self.lyrics_found or self.lyrics_missing:
+            sections.append("LYRICS FOUND\n" + ("\n".join(self.lyrics_found) or "none"))
+        if self.lyrics_missing:
+            sections.append("NO LYRICS FOUND ONLINE\n" + "\n".join(self.lyrics_missing))
         if self.no_cover:
             sections.append("ALBUMS LEFT AS THEY WERE\n" + "\n".join(self.no_cover))
         sections.append("FILES RENAMED\n" + ("\n".join(self.renamed) or "none"))
@@ -563,6 +620,9 @@ class MainWindow(QMainWindow):
         row("Make Compilation", "opticaldisc", self.make_compilation, "Set Album Artist + Compilation flag, keep each track's artist (⌘K)")
         row("Auto-number", "list.number", self.auto_number, "Number the selected tracks in list order")
         row("Rename Files", "character.cursor.ibeam", self.rename_files, "Rename files from their tags")
+        row("Remove Duplicates", "square.on.square", self.remove_duplicates,
+            "Find songs loaded more than once and move the extra copies to the Trash")
+        row("Find Lyrics", "text.quote", self.find_lyrics, "Look up lyrics online for the selected songs (or all)")
         row("Fix All", "wand.and.stars", self.magic_wand,
             "Every track: find covers (you choose), rename to the default style, and save, in one go")
         section("List")
@@ -824,6 +884,9 @@ class MainWindow(QMainWindow):
                                   "Search Apple Music and MusicBrainz for the album cover")
         self.act_number = act("Auto-number…", self.auto_number, None, "Number the selected tracks in list order")
         self.act_rename = act("Rename Files…", self.rename_files, None, "Rename files from their tags")
+        self.act_dupes = act("Remove Duplicates…", self.remove_duplicates, None,
+                             "Find songs loaded more than once and move the extra copies to the Trash")
+        self.act_lyrics = act("Find Lyrics…", self.find_lyrics, "Ctrl+Shift+L", "Look up lyrics online")
         self.act_wand = act("Fix All…", self.magic_wand, "Ctrl+Shift+W",
                             "Find covers, rename to the default style and save every track in one go")
         self.act_selall = act("Select All", self.select_all, QKeySequence.SelectAll)
@@ -836,7 +899,8 @@ class MainWindow(QMainWindow):
         m = self.menuBar().addMenu("&Edit")
         m.addActions([self.act_selall, self.act_selnone, self.act_revert])
         m = self.menuBar().addMenu("&Tools")
-        m.addActions([self.act_comp, self.act_number, self.act_rename, self.act_find_cover])
+        m.addActions([self.act_comp, self.act_number, self.act_rename, self.act_find_cover,
+                      self.act_lyrics, self.act_dupes])
         m.addSeparator(); m.addAction(self.act_wand)
 
         m = self.menuBar().addMenu("&View")
@@ -1551,10 +1615,13 @@ class MainWindow(QMainWindow):
         albums = self.album_groups(tracks)
         label, pattern = RENAME_PRESETS[0]
         renames = [t for t in tracks if (stem := tagio.format_filename(pattern, t.tags)) and stem != t.path.stem]
-        dlg = MagicWandDialog(self, albums, len(renames), label)
+        dupes = find_duplicates(tracks)
+        extra = sum(len(g) - 1 for g in dupes)
+        no_lyrics = sum(1 for t in tracks if not t.tags["lyrics"].strip())
+        dlg = MagicWandDialog(self, albums, len(renames), label, duplicate_count=extra, lyrics_count=no_lyrics)
         if dlg.exec() != QDialog.Accepted:
             return
-        self._finish_fix_all(dlg, albums, tracks, pattern)
+        self._finish_fix_all(dlg, albums, tracks, pattern, dupes)
 
     def album_groups(self, tracks):
         """The tracks by album (album artist or artist + album), each with its current cover if they share one."""
@@ -1576,11 +1643,21 @@ class MainWindow(QMainWindow):
                     a["current"] = rounded(pix, 64, self.devicePixelRatioF())
         return albums
 
-    def _finish_fix_all(self, dlg, albums, tracks, pattern):
+    def _finish_fix_all(self, dlg, albums, tracks, pattern, dupes):
         report = WandReport()
+        if dlg.do_duplicates.isChecked():
+            trashed = self.trash_tracks([t for g in dupes for t in g[1:]], report)
+            gone = {id(t) for t in trashed}
+            tracks = [t for t in tracks if id(t) not in gone]
+            for a in albums:
+                a["tracks"] = [t for t in a["tracks"] if id(t) not in gone]
+        if dlg.do_lyrics.isChecked():
+            self.fetch_lyrics([t for t in tracks if not t.tags["lyrics"].strip()], True, report, "Fix All")
         for i, a in enumerate(albums):
             raw = dlg.covers.get(i)
             cover = self.normalise_image(raw) if raw else None
+            if cover and not a["tracks"]:
+                continue                       # every copy of this album was a duplicate
             if cover:
                 for t in a["tracks"]:
                     t.set_art(*cover)
@@ -1604,6 +1681,7 @@ class MainWindow(QMainWindow):
             try:
                 t.save()
                 t.size = t.path.stat().st_size
+                self.write_lrc(t)
                 report.saved += 1
             except Exception as exc:
                 report.errors.append(f"{t.path.name}: not saved ({exc})")
@@ -1613,7 +1691,7 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
             old = t.path.name
             try:
-                if t.is_dirty():
+                if t.is_dirty() or getattr(t, "pending_lrc", None):
                     raise OSError("it has unsaved changes")   # its save failed above; leave the name alone
                 tagio.rename_track(t, tagio.format_filename(pattern, t.tags))
                 report.renamed.append(f"{old}  →  {t.path.name}")
@@ -1627,6 +1705,105 @@ class MainWindow(QMainWindow):
         self.update_status()
         self.statusBar().showMessage(report.headline(), 10000)
         report.show(self)
+
+    # ---- duplicates and lyrics
+    def tool_tracks(self) -> list[Track]:
+        """The selected tracks, or every track when none are selected."""
+        self.apply_draft()
+        return self.selected_tracks() or [self.track_at(r) for r in range(self.table.rowCount())]
+
+    def remove_duplicates(self):
+        tracks = self.tool_tracks()
+        groups = find_duplicates(tracks)
+        if not groups:
+            QMessageBox.information(self, APP_NAME, "No duplicates found: every song is loaded only once.")
+            return
+        dlg = DuplicatesDialog(self, groups)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        report = WandReport()
+        self.trash_tracks(dlg.chosen(), report)
+        msg = f"Moved {len(report.trashed)} duplicate{'s' if len(report.trashed) != 1 else ''} to the Trash."
+        if report.errors:
+            QMessageBox.warning(self, APP_NAME, msg + "\n\nSome couldn't be moved:\n" + "\n".join(report.errors[:15]))
+        self.statusBar().showMessage(msg, 8000)
+
+    def trash_tracks(self, tracks: list[Track], report) -> list[Track]:
+        """Move these files to the Trash (recoverable) and take them off the list."""
+        moved = []
+        for t in tracks:
+            if QFile.moveToTrash(str(t.path)):
+                lrc = t.path.with_suffix(".lrc")
+                if lrc.exists():
+                    QFile.moveToTrash(str(lrc))
+                moved.append(t)
+                report.trashed.append(str(t.path))
+            else:
+                report.errors.append(f"{t.path.name}: couldn't be moved to the Trash")
+        gone = {id(t) for t in moved}
+        for r in range(self.table.rowCount() - 1, -1, -1):
+            if id(self.track_at(r)) in gone:
+                del self.tracks[self.table.item(r, 0).data(Qt.UserRole)]
+                self.table.removeRow(r)
+        self.stack.setCurrentIndex(1 if self.tracks else 0)
+        self.populate_panel(self.selected_tracks())
+        self.update_status()
+        return moved
+
+    def find_lyrics(self):
+        tracks = self.tool_tracks()
+        if not tracks:
+            QMessageBox.information(self, APP_NAME, "Add some music first, then look for lyrics.")
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Find Lyrics")
+        missing = [t for t in tracks if not t.tags["lyrics"].strip()]
+        box.setText(f"Look up lyrics online for {len(tracks)} song{'s' if len(tracks) != 1 else ''}?")
+        box.setInformativeText("They're added to the songs (Commit to File saves them), and time-synced lyrics "
+                               "are also saved as .lrc files next to the songs.")
+        skip = QCheckBox(f"Skip the {len(tracks) - len(missing)} that already have lyrics")
+        skip.setChecked(True); skip.setVisible(len(missing) < len(tracks))
+        box.setCheckBox(skip)
+        go = box.addButton("Find Lyrics", QMessageBox.AcceptRole); box.addButton(QMessageBox.Cancel)
+        box.exec()
+        if box.clickedButton() is not go:
+            return
+        todo = missing if skip.isChecked() else tracks
+        report = WandReport()
+        self.fetch_lyrics(todo, True, report, "Find Lyrics")
+        self.after_change(todo)
+        self.populate_panel(self.selected_tracks())
+        found, lost = len(report.lyrics_found), len(report.lyrics_missing)
+        QMessageBox.information(self, "Find Lyrics",
+                                f"Found lyrics for {found} of {len(todo)} song{'s' if len(todo) != 1 else ''}. "
+                                "Commit to File to save them."
+                                + (f"\n\nNot found online:\n" + "\n".join(report.lyrics_missing[:20]) if lost else ""))
+
+    def fetch_lyrics(self, tracks: list[Track], save_lrc: bool, report, title: str):
+        """Look each song up online (with progress) and put the lyrics on it; .lrc text waits for Commit."""
+        finder = LyricsFinder()
+        progress = QProgressDialog("Finding lyrics…", "Stop", 0, max(1, len(tracks)), self)
+        progress.setWindowTitle(title); progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0); progress.setMinimumWidth(380)
+        for n, t in enumerate(tracks):
+            if progress.wasCanceled():
+                break
+            name = f"{t.tags['artist']} - {t.tags['title']}"
+            progress.setLabelText(f"Finding lyrics {n + 1} of {len(tracks)}\n{name}"); progress.setValue(n)
+            found = finder.find(t.tags["artist"] or t.tags["albumartist"], t.tags["title"], t.tags["album"], t.length)
+            if found == ("[Instrumental]", ""):
+                report.lyrics_found.append(name + " (instrumental, left blank)")
+            elif found:
+                plain, synced = found
+                if plain:
+                    t.tags["lyrics"] = plain
+                if synced and save_lrc:
+                    t.pending_lrc = synced
+                report.lyrics_found.append(name)
+            else:
+                report.lyrics_missing.append(name)
+        progress.setValue(max(1, len(tracks))); progress.close()
+        self.refresh_tracks(tracks)
 
     @staticmethod
     def normalise_image(raw: bytes):
@@ -1738,7 +1915,15 @@ class MainWindow(QMainWindow):
 
     # ---- save / revert / remove
     def dirty_tracks(self) -> list[Track]:
-        return [t for t in self.tracks.values() if t.is_dirty()]
+        return [t for t in self.tracks.values() if t.is_dirty() or getattr(t, "pending_lrc", None)]
+
+    @staticmethod
+    def write_lrc(t: Track):
+        """Save found time-synced lyrics as a .lrc file next to the song (done on Commit)."""
+        text = getattr(t, "pending_lrc", None)
+        if text:
+            t.path.with_suffix(".lrc").write_text(text + "\n", encoding="utf-8")
+            t.pending_lrc = None
 
     def save_all(self) -> bool:
         self.apply_draft()
@@ -1752,6 +1937,7 @@ class MainWindow(QMainWindow):
                 try:
                     t.save()
                     t.size = t.path.stat().st_size
+                    self.write_lrc(t)
                 except Exception as exc:
                     errors.append(f"{t.path.name}: {exc}")
         finally:
@@ -1772,6 +1958,7 @@ class MainWindow(QMainWindow):
         tracks = self.selected_tracks()
         for t in tracks:
             t.revert()
+            t.pending_lrc = None
         self.populate_panel(tracks)
         self.after_change(tracks)
 
