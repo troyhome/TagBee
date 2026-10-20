@@ -2081,7 +2081,20 @@ def cli_set_cover(image: str, files: list[str]) -> int:
     return 1 if failed else 0
 
 
+def raise_open_file_limit():
+    """macOS starts apps with room for only 256 open files; big online searches (many cover hosts) need more."""
+    try:
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        want = 8192 if hard == resource.RLIM_INFINITY else min(8192, hard)
+        if soft < want:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
+    except (ImportError, ValueError, OSError):
+        pass
+
+
 def main():
+    raise_open_file_limit()
     if len(sys.argv) > 3 and sys.argv[1] == "--set-cover":
         sys.exit(cli_set_cover(sys.argv[2], sys.argv[3:]))
     app = TagBeeApp(sys.argv)

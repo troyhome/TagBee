@@ -16,6 +16,16 @@ from PySide6.QtWidgets import (
 
 USER_AGENT = b"TagBee/1.0 ( https://github.com/troyhome/TagBee )"   # MusicBrainz asks apps to say who they are
 THUMB = 160
+_NET = None
+
+
+def shared_net() -> QNetworkAccessManager:
+    """One network manager for the whole app. Each manager runs its own thread and files, and the
+    Fix All window used to make one per album: with many albums TagBee ran out and crashed."""
+    global _NET
+    if _NET is None:
+        _NET = QNetworkAccessManager()
+    return _NET
 
 
 class CoverSearch(QObject):
@@ -26,7 +36,7 @@ class CoverSearch(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.net = QNetworkAccessManager(self)
+        self.net = shared_net()
         self._gen = 0
         self._pending = 0
         self._count = 0
@@ -330,6 +340,8 @@ class MagicWandDialog(QDialog):
         row, a = self.rows[i], self.albums[i]
         row.state.setText("Searching…")
         self.status.setText(f"Searching {i + 1} of {len(self.rows)}: {a['album']}")
+        if self.search is not None:
+            self.search.deleteLater()          # the previous album's search is finished
         self.search = CoverSearch(self)
         self.search.thumb_ready.connect(row.add)
         def finished(n, row=row):

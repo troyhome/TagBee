@@ -19,7 +19,8 @@ COPY_SUFFIX = re.compile(r"(\s*\(\d+\)|\s+copy(\s+\d+)?|\s*-\s*copy)$", re.I)   
 
 class LyricsFinder:
     def __init__(self):
-        self.net = QNetworkAccessManager()
+        from covers import shared_net
+        self.net = shared_net()
 
     def _get(self, url: QUrl, timeout_ms: int = 15000):
         """(status, body) for a GET, retrying when the server says it's busy."""
