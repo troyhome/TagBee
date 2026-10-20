@@ -433,6 +433,43 @@ class PreferencesDialog(QDialog):
         self.custom_mark.setVisible(cur not in self.swatches)
 
 
+class WandReport:
+    """What the Magic Wand did, shown when it finishes."""
+
+    def __init__(self):
+        self.covers: list[str] = []
+        self.no_cover: list[str] = []
+        self.renamed: list[str] = []
+        self.errors: list[str] = []
+        self.saved = 0
+
+    def headline(self) -> str:
+        n = len(self.covers)
+        text = (f"Magic Wand: {n} cover{'s' if n != 1 else ''} added, {self.saved} file{'s' if self.saved != 1 else ''} "
+                f"saved, {len(self.renamed)} renamed")
+        return text + (f", {len(self.errors)} problem{'s' if len(self.errors) != 1 else ''}." if self.errors else ".")
+
+    def show(self, parent):
+        sections = []
+        if self.errors:
+            sections.append("PROBLEMS\n" + "\n".join(self.errors))
+        sections.append("COVERS ADDED\n" + ("\n".join(self.covers) or "none"))
+        if self.no_cover:
+            sections.append("ALBUMS LEFT AS THEY WERE\n" + "\n".join(self.no_cover))
+        sections.append("FILES RENAMED\n" + ("\n".join(self.renamed) or "none"))
+        dlg = QDialog(parent); dlg.setWindowTitle("Magic Wand Report"); dlg.resize(620, 460)
+        lay = QVBoxLayout(dlg)
+        head = QLabel(("Done with some problems. " if self.errors else "All done. ") + self.headline().split(": ", 1)[1])
+        head.setWordWrap(True)
+        f = head.font(); f.setBold(True); head.setFont(f)
+        lay.addWidget(head)
+        details = QPlainTextEdit("\n\n".join(sections)); details.setReadOnly(True)
+        lay.addWidget(details, 1)
+        box = QDialogButtonBox(QDialogButtonBox.Ok); box.accepted.connect(dlg.accept)
+        lay.addWidget(box)
+        dlg.exec()
+
+
 # --------------------------------------------------------------------------- main window
 
 class MainWindow(QMainWindow):
@@ -1506,33 +1543,56 @@ class MainWindow(QMainWindow):
         dlg = MagicWandDialog(self, albums, len(renames), label)
         if dlg.exec() != QDialog.Accepted:
             return
-        covered = 0
-        for i, raw in dlg.covers.items():
-            cover = self.normalise_image(raw)
+        report = WandReport()
+        for i, a in enumerate(albums):
+            raw = dlg.covers.get(i)
+            cover = self.normalise_image(raw) if raw else None
             if cover:
-                for t in albums[i]["tracks"]:
+                for t in a["tracks"]:
                     t.set_art(*cover)
-                covered += 1
-        to_save = len(self.dirty_tracks())
-        if not self.save_all():
-            return                              # save_all already said what went wrong
-        renamed, errors = 0, []
-        if dlg.do_rename.isChecked():
-            for t in tracks:
-                stem = tagio.format_filename(pattern, t.tags)
-                if stem and stem != t.path.stem:
-                    try:
-                        tagio.rename_track(t, stem); renamed += 1
-                    except OSError as exc:
-                        errors.append(f"{t.path.name}: {exc}")
+                report.covers.append(f"{a['album'] or '(no album)'} - {a['artist']} ({len(a['tracks'])} songs)")
+            elif raw:
+                report.errors.append(f"{a['album']}: the downloaded cover couldn't be read")
+            else:
+                report.no_cover.append(a["album"] or "(no album)")
+        dirty = self.dirty_tracks()
+        do_rename = dlg.do_rename.isChecked()
+        renames = [t for t in tracks if do_rename and (stem := tagio.format_filename(pattern, t.tags))
+                   and stem != t.path.stem] if do_rename else []
+        steps = len(dirty) + len(renames)
+        progress = QProgressDialog("Saving…", None, 0, max(1, steps), self)
+        progress.setWindowTitle("Magic Wand"); progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0); progress.setMinimumWidth(380)
+        done = 0
+        for n, t in enumerate(dirty, 1):
+            progress.setLabelText(f"Saving {n} of {len(dirty)}\n{t.path.name}"); progress.setValue(done)
+            QApplication.processEvents()
+            try:
+                t.save()
+                t.size = t.path.stat().st_size
+                report.saved += 1
+            except Exception as exc:
+                report.errors.append(f"{t.path.name}: not saved ({exc})")
+            done += 1
+        for n, t in enumerate(renames, 1):
+            progress.setLabelText(f"Renaming {n} of {len(renames)}\n{t.path.name}"); progress.setValue(done)
+            QApplication.processEvents()
+            old = t.path.name
+            try:
+                if t.is_dirty():
+                    raise OSError("it has unsaved changes")   # its save failed above; leave the name alone
+                tagio.rename_track(t, tagio.format_filename(pattern, t.tags))
+                report.renamed.append(f"{old}  →  {t.path.name}")
+            except OSError as exc:
+                report.errors.append(f"{old}: not renamed ({exc})")
+            done += 1
+        progress.setValue(max(1, steps)); progress.close()
         for row in range(self.table.rowCount()):
             self.refresh_row(row)
         self.populate_panel(self.selected_tracks())
         self.update_status()
-        if errors:
-            QMessageBox.warning(self, APP_NAME, "Some files couldn't be renamed:\n\n" + "\n".join(errors[:15]))
-        self.statusBar().showMessage(f"Magic Wand: {covered} cover{'s' if covered != 1 else ''} added, "
-                                     f"{to_save} file{'s' if to_save != 1 else ''} saved, {renamed} renamed.", 10000)
+        self.statusBar().showMessage(report.headline(), 10000)
+        report.show(self)
 
     @staticmethod
     def normalise_image(raw: bytes):

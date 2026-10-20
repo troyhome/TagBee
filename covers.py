@@ -11,7 +11,7 @@ from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QListWidget, QListWidgetItem, QProgressBar, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 USER_AGENT = b"TagBee/1.0 ( https://github.com/troyhome/TagBee )"   # MusicBrainz asks apps to say who they are
@@ -296,7 +296,9 @@ class MagicWandDialog(QDialog):
         note = QLabel("Do It All also commits every other unsaved change to the files. No backups are made.")
         note.setObjectName("faint"); lay.addWidget(note)
         self.status = QLabel(); self.status.setObjectName("faint")
-        lay.addWidget(self.status)
+        self.bar = QProgressBar(); self.bar.setRange(0, len(albums)); self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(6)
+        lay.addWidget(self.status); lay.addWidget(self.bar)
         box = QDialogButtonBox(QDialogButtonBox.Cancel)
         self.go = box.addButton("Do It All", QDialogButtonBox.AcceptRole)
         box.accepted.connect(self.start); box.rejected.connect(self.reject)
@@ -306,8 +308,10 @@ class MagicWandDialog(QDialog):
 
     # one album at a time (MusicBrainz allows about one request a second)
     def search_next(self):
+        self.bar.setValue(self._next)
         if self._next >= len(self.rows):
-            self.status.setText("Search finished.")
+            found = sum(1 for r in self.rows if r.grid.count() > 1)
+            self.status.setText(f"Search finished: covers found for {found} of {len(self.rows)} albums.")
             return
         i = self._next
         row, a = self.rows[i], self.albums[i]
@@ -328,6 +332,7 @@ class MagicWandDialog(QDialog):
         self.todo = [(i, r.choice()) for i, r in enumerate(self.rows)
                      if self.do_covers.isChecked() and r.choice()]
         self.fetcher = CoverSearch(self)
+        self.bar.setRange(0, max(1, len(self.todo))); self.bar.setValue(0)
         self.fetch_next()
 
     def fetch_next(self):
@@ -338,6 +343,7 @@ class MagicWandDialog(QDialog):
         self.status.setText(f"Downloading cover for {self.albums[i]['album']}…")
 
         def got(data, i=i):
+            self.bar.setValue(self.bar.value() + 1)
             if data and not QImage.fromData(data).isNull():
                 self.covers[i] = data
                 self.rows[i].state.setText("Cover downloaded")
