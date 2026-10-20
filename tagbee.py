@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 import tagio
 import theme
 from tagio import Track
-from covers import CoverSearchDialog
+from covers import CoverSearchDialog, MagicWandDialog
 from widgets import FieldBox, FlatButton, Segmented, eyebrow_font, symbol
 
 APP_NAME = "TagBee"
@@ -58,6 +58,10 @@ def resource_path(name: str):
         if cand.exists():
             return cand
     return None
+
+
+def norm_key(s: str) -> str:
+    return "".join(ch for ch in s.lower() if ch.isalnum())
 
 
 def natural_key(s: str):
@@ -522,6 +526,8 @@ class MainWindow(QMainWindow):
         row("Make Compilation", "opticaldisc", self.make_compilation, "Set Album Artist + Compilation flag, keep each track's artist (⌘K)")
         row("Auto-number", "list.number", self.auto_number, "Number the selected tracks in list order")
         row("Rename Files", "character.cursor.ibeam", self.rename_files, "Rename files from their tags")
+        row("Magic Wand", "wand.and.stars", self.magic_wand,
+            "Every track: find covers (you choose), rename to the default style, and save, in one go")
         section("List")
         row("Select All", "checkmark.circle", self.select_all, "Select every track in the list (⌘A)")
         row("Select None", "circle", self.select_none, "Deselect all tracks (⇧⌘A)")
@@ -781,6 +787,8 @@ class MainWindow(QMainWindow):
                                   "Search Apple Music and MusicBrainz for the album cover")
         self.act_number = act("Auto-number…", self.auto_number, None, "Number the selected tracks in list order")
         self.act_rename = act("Rename Files…", self.rename_files, None, "Rename files from their tags")
+        self.act_wand = act("Magic Wand…", self.magic_wand, "Ctrl+Shift+W",
+                            "Find covers, rename to the default style and save every track in one go")
         self.act_selall = act("Select All", self.select_all, QKeySequence.SelectAll)
         self.act_selnone = act("Select None", self.select_none, "Ctrl+Shift+A")
 
@@ -792,6 +800,7 @@ class MainWindow(QMainWindow):
         m.addActions([self.act_selall, self.act_selnone, self.act_revert])
         m = self.menuBar().addMenu("&Tools")
         m.addActions([self.act_comp, self.act_number, self.act_rename, self.act_find_cover])
+        m.addSeparator(); m.addAction(self.act_wand)
 
         m = self.menuBar().addMenu("&View")
         theme_menu = m.addMenu("Theme")
@@ -1467,6 +1476,75 @@ class MainWindow(QMainWindow):
         if dlg.exec() == QDialog.Accepted and dlg.result:
             self.set_cover_bytes(dlg.result)
             self.statusBar().showMessage("Cover found. Apply, then Commit to File, to save it.", 6000)
+
+    def magic_wand(self):
+        """Select everything, find a cover per album (you choose), rename to the default style, save all."""
+        if not self.tracks:
+            QMessageBox.information(self, APP_NAME, "Add some music first, then use the Magic Wand.")
+            return
+        self.table.selectAll()
+        self.apply_draft()
+        tracks = [self.track_at(r) for r in range(self.table.rowCount())]
+        albums, index = [], {}
+        for t in tracks:
+            artist = t.tags["albumartist"] or t.tags["artist"]
+            key = (norm_key(artist), norm_key(t.tags["album"]))
+            if key not in index:
+                index[key] = len(albums)
+                various = artist.strip().lower() in ("various artists", "various", "va")
+                albums.append({"album": t.tags["album"], "artist": artist, "tracks": [],
+                               "search_artist": "" if various or t.tags["compilation"] else artist})
+            albums[index[key]]["tracks"].append(t)
+        for a in albums:                       # small picture of the current cover, if all share one
+            art = a["tracks"][0].read_art()
+            if art and len({t.art_digest() for t in a["tracks"]}) == 1:
+                pix = QPixmap()
+                if pix.loadFromData(art[1]):
+                    a["current"] = rounded(pix, 64, self.devicePixelRatioF())
+        label, pattern = RENAME_PRESETS[0]
+        renames = [t for t in tracks if (stem := tagio.format_filename(pattern, t.tags)) and stem != t.path.stem]
+        dlg = MagicWandDialog(self, albums, len(renames), label)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        covered = 0
+        for i, raw in dlg.covers.items():
+            cover = self.normalise_image(raw)
+            if cover:
+                for t in albums[i]["tracks"]:
+                    t.set_art(*cover)
+                covered += 1
+        to_save = len(self.dirty_tracks())
+        if not self.save_all():
+            return                              # save_all already said what went wrong
+        renamed, errors = 0, []
+        if dlg.do_rename.isChecked():
+            for t in tracks:
+                stem = tagio.format_filename(pattern, t.tags)
+                if stem and stem != t.path.stem:
+                    try:
+                        tagio.rename_track(t, stem); renamed += 1
+                    except OSError as exc:
+                        errors.append(f"{t.path.name}: {exc}")
+        for row in range(self.table.rowCount()):
+            self.refresh_row(row)
+        self.populate_panel(self.selected_tracks())
+        self.update_status()
+        if errors:
+            QMessageBox.warning(self, APP_NAME, "Some files couldn't be renamed:\n\n" + "\n".join(errors[:15]))
+        self.statusBar().showMessage(f"Magic Wand: {covered} cover{'s' if covered != 1 else ''} added, "
+                                     f"{to_save} file{'s' if to_save != 1 else ''} saved, {renamed} renamed.", 10000)
+
+    @staticmethod
+    def normalise_image(raw: bytes):
+        """(mime, bytes) ready to embed: JPEG/PNG kept, anything else converted to JPEG. None if unreadable."""
+        img = QImage.fromData(raw)
+        if img.isNull():
+            return None
+        if raw[:8] == b"\x89PNG\r\n\x1a\n" or raw[:3] == b"\xff\xd8\xff":
+            return tagio.sniff_mime(raw), raw
+        buf = QBuffer(); buf.open(QIODevice.WriteOnly)
+        img.convertToFormat(QImage.Format_RGB32).save(buf, "JPEG", 92)
+        return "image/jpeg", bytes(buf.data())
 
     def set_cover_bytes(self, raw: bytes):
         if not self.panel_tracks:

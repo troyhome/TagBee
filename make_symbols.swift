@@ -6,7 +6,7 @@ let symbols = [
     "doc.badge.plus", "folder.badge.plus", "person.3", "list.number", "character.cursor.ibeam",
     "minus.circle", "trash", "square.and.arrow.down", "arrow.down.to.line", "photo", "xmark.circle.fill",
     "checkmark", "arrow.uturn.backward", "music.note.list", "folder", "checkmark.circle", "circle",
-    "sidebar.left", "chevron.down", "chevron.right", "opticaldisc", "magnifyingglass",
+    "sidebar.left", "chevron.down", "chevron.right", "opticaldisc", "magnifyingglass", "wand.and.stars",
 ]
 let canvas: CGFloat = 128  // square image; every symbol drawn at the same size (like letters), centred
 
