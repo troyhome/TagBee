@@ -1666,13 +1666,19 @@ class TagBeeApp(QApplication):
             self._pending.append(e.file())
             self._flush.start()      # batch several dropped files into one load
             return True
+        if e.type() == QEvent.ApplicationActivate and self.win is not None and not self.win.isVisible():
+            self.show_window()       # clicked in the Dock after closing the window: bring it back
         return super().event(e)
+
+    def show_window(self):
+        self.win.show()
+        self.win.raise_(); self.win.activateWindow()
 
     def _deliver(self):
         if self.win is not None and self._pending:
             paths, self._pending = self._pending, []
+            self.show_window()       # the window may have been closed (the app keeps running on macOS)
             self.win.add_paths(paths)
-            self.win.raise_(); self.win.activateWindow()
 
 
 def cli_set_cover(image: str, files: list[str]) -> int:
