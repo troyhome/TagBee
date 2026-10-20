@@ -1675,7 +1675,31 @@ class TagBeeApp(QApplication):
             self.win.raise_(); self.win.activateWindow()
 
 
+def cli_set_cover(image: str, files: list[str]) -> int:
+    """TagBee --set-cover IMAGE FILE...: embed a JPEG/PNG cover into each file, no window (used by MacBee)."""
+    try:
+        raw = Path(image).read_bytes()
+    except OSError as exc:
+        print(f"ERROR {image}: {exc}"); return 2
+    if not (raw[:8] == b"\x89PNG\r\n\x1a\n" or raw[:3] == b"\xff\xd8\xff"):
+        print(f"ERROR {image}: not a JPEG or PNG image"); return 2
+    mime, failed = tagio.sniff_mime(raw), 0
+    for f in files:
+        try:
+            t = Track(f)
+            t.set_art(mime, raw)
+            t.save()
+            print(f"OK {f}")
+        except Exception as exc:
+            failed += 1
+            print(f"ERROR {f}: {exc}")
+    sys.stdout.flush()
+    return 1 if failed else 0
+
+
 def main():
+    if len(sys.argv) > 3 and sys.argv[1] == "--set-cover":
+        sys.exit(cli_set_cover(sys.argv[2], sys.argv[3:]))
     app = TagBeeApp(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setStyle("Fusion")      # draws every control from our theme colours (the native Mac style ignores some)
