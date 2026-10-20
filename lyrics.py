@@ -14,6 +14,7 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequ
 
 USER_AGENT = b"TagBee/1.1 ( https://github.com/troyhome/TagBee )"
 LOSSLESS = {"FLAC", "ALAC", "WAV", "AIFF"}
+COPY_SUFFIX = re.compile(r"(\s*\(\d+\)|\s+copy(\s+\d+)?|\s*-\s*copy)$", re.I)   # " (2)", " copy", " copy 3"
 
 
 class LyricsFinder:
@@ -95,9 +96,13 @@ def find_duplicates(tracks) -> list[list]:
     """Groups of tracks that are the same song (same artist and title, lengths within 3 s), best copy first."""
     by_key: dict[tuple, list] = {}
     for t in tracks:
-        artist, title = _norm(t.tags["artist"]), _norm(clean_title(t.tags["title"]))
+        artist, title = _norm(t.tags["artist"] or t.tags["albumartist"]), _norm(clean_title(t.tags["title"]))
         if artist and title:
-            by_key.setdefault((artist, title), []).append(t)
+            key = ("tags", artist, title)
+        else:
+            # no tags to go on: "Hosanna - Eric Nordhoff - 08 (2).m4a" is a copy of "... - 08.m4a"
+            key = ("name", _norm(COPY_SUFFIX.sub("", t.path.stem)))
+        by_key.setdefault(key, []).append(t)
     groups = []
     for same in by_key.values():
         same.sort(key=lambda t: t.length)
@@ -112,5 +117,6 @@ def find_duplicates(tracks) -> list[list]:
         if len(cluster) > 1:
             groups.append(cluster)
     for g in groups:
-        g.sort(key=quality_score, reverse=True)
+        # best quality first; between equal copies keep the one without "(2)" / "copy" in its name
+        g.sort(key=lambda t: (quality_score(t), not COPY_SUFFIX.search(t.path.stem)), reverse=True)
     return groups

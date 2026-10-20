@@ -648,13 +648,11 @@ class MainWindow(QMainWindow):
         self.table.customContextMenuRequested.connect(self.row_menu)
         hh = self.table.horizontalHeader()
         hh.setSectionsClickable(True)
-        hh.setStretchLastSection(False)
-        hh.setSectionResizeMode(QHeaderView.Interactive)
+        hh.setStretchLastSection(True)                 # the last column takes up any spare width
+        hh.setSectionResizeMode(QHeaderView.Interactive)  # every column: drag its edge to resize
         hh.setMinimumSectionSize(36)
         hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        for i, (key, _, _) in enumerate(COLUMNS):
-            if key in ("title", "artist", "album"):
-                hh.setSectionResizeMode(i, QHeaderView.Stretch)   # always share the free width, so Album is visible
+        hh.sectionResized.connect(self.on_column_resized)
         hh.setContextMenuPolicy(Qt.CustomContextMenu)
         hh.customContextMenuRequested.connect(self.header_menu)
         for i, (_, _, w) in enumerate(COLUMNS):
@@ -859,6 +857,29 @@ class MainWindow(QMainWindow):
         if paths:
             subprocess.run(["open", "-R", *paths[:20]], check=False)
 
+    def apply_column_widths(self):
+        """Widths you dragged (remembered), or the defaults for the text size."""
+        try:
+            saved = json.loads(str(self.settings.value("columnWidths", "{}")))
+        except ValueError:
+            saved = {}
+        scale = self.font_pt / BASE_PT
+        self._sizing_columns = True
+        for i, (key, _, w) in enumerate(COLUMNS):
+            default = int(w * (1.6 if key in ("title", "artist", "album") else 1.0) * scale)
+            self.table.setColumnWidth(i, int(saved.get(key, default)))
+        self._sizing_columns = False
+
+    def on_column_resized(self, i: int, old: int, new: int):
+        if getattr(self, "_sizing_columns", False) or i == self.table.horizontalHeader().count() - 1:
+            return
+        try:
+            saved = json.loads(str(self.settings.value("columnWidths", "{}")))
+        except ValueError:
+            saved = {}
+        saved[COLUMNS[i][0]] = new
+        self.settings.setValue("columnWidths", json.dumps(saved))
+
     def set_column_hidden(self, i: int, hidden: bool):
         self.table.setColumnHidden(i, hidden)
         self.settings.setValue("hiddenCols", json.dumps([c for c in range(len(COLUMNS)) if self.table.isColumnHidden(c)]))
@@ -1031,9 +1052,7 @@ class MainWindow(QMainWindow):
         for w in self.findChildren(QWidget):          # make existing widgets pick up the new size
             w.setFont(f)
         self.apply_type_scale()
-        scale = pt / BASE_PT
-        for i, (_, _, w) in enumerate(COLUMNS):
-            self.table.setColumnWidth(i, int(w * scale))
+        self.apply_column_widths()
         self.table.verticalHeader().setDefaultSectionSize(int(pt * 2.3))
         self.lyrics.setFixedHeight(int(pt * 7))
         self.right.setMinimumWidth(int(pt * 20))
