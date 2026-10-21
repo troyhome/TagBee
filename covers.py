@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 
 from PySide6.QtCore import QObject, QSize, Qt, QTimer, QUrl, QUrlQuery, Signal
-from PySide6.QtGui import QIcon, QImage, QPixmap
+from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
@@ -215,57 +215,116 @@ def norm(text: str) -> str:
 
 
 class AlbumCoverRow(QWidget):
-    """One album in the magic wand: its name on the left, a row of covers to choose from (or None)."""
+    """One album: its name, the cover it has NOW and the one it WILL GET, then the choices (chosen one first)."""
+    TILE = 96
 
     def __init__(self, title: str, artist: str, count: int, current: QPixmap | None):
         super().__init__()
+        import theme
+        t = theme.current
         self.title, self.artist = title, artist
-        lay = QHBoxLayout(self); lay.setContentsMargins(0, 6, 0, 6); lay.setSpacing(12)
+        lay = QHBoxLayout(self); lay.setContentsMargins(0, 8, 0, 8); lay.setSpacing(14)
+
         info = QVBoxLayout(); info.setSpacing(2)
-        cover = QLabel(); cover.setFixedSize(64, 64); cover.setObjectName("cover"); cover.setAlignment(Qt.AlignCenter)
-        if current is not None:
-            cover.setPixmap(current)
-        else:
-            cover.setText("No cover")
         name = QLabel(title or "(no album)"); name.setWordWrap(True)
         f = name.font(); f.setBold(True); name.setFont(f)
-        sub = QLabel(f"{artist}\n{count} song{'s' if count != 1 else ''}"); sub.setObjectName("muted")
+        sub = QLabel(f"{artist} · {count} song{'s' if count != 1 else ''}"); sub.setObjectName("muted"); sub.setWordWrap(True)
         self.state = QLabel("Waiting…"); self.state.setObjectName("faint")
-        for w in (cover, name, sub, self.state):
-            info.addWidget(w)
-        info.addStretch(1)
-        box = QWidget(); box.setFixedWidth(170); box.setLayout(info)
+        info.addWidget(name); info.addWidget(sub); info.addWidget(self.state); info.addSpacing(6)
+
+        def tile(caption: str, border: str):
+            col = QVBoxLayout(); col.setSpacing(3)
+            cap = QLabel(caption); cap.setObjectName("section")
+            pic = QLabel(); pic.setFixedSize(self.TILE, self.TILE); pic.setAlignment(Qt.AlignCenter); pic.setWordWrap(True)
+            pic.setStyleSheet(f"QLabel {{ background: {t.surface.name()}; color: {t.text_tertiary.name()};"
+                              f" border: {border}; border-radius: 6px; }}")
+            col.addWidget(cap); col.addWidget(pic)
+            return col, pic
+        now_col, self.now = tile("NOW", f"1px solid {t.separator.name()}")
+        new_col, self.new = tile("WILL BE", f"3px solid {t.accent.name()}")
+        self.current = current
+        if current is not None:
+            self.now.setPixmap(current.scaled(self.TILE * 2, self.TILE * 2, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                               if current.width() < self.TILE else current)
+        else:
+            self.now.setText("No cover")
+        pair = QHBoxLayout(); pair.setSpacing(10); pair.addLayout(now_col); pair.addLayout(new_col); pair.addStretch(1)
+        info.addLayout(pair); info.addStretch(1)
+        box = QWidget(); box.setFixedWidth(self.TILE * 2 + 30); box.setLayout(info)
         lay.addWidget(box)
+
         self.grid = QListWidget()
         self.grid.setViewMode(QListWidget.IconMode)
         self.grid.setFlow(QListWidget.LeftToRight)
         self.grid.setWrapping(False)
         self.grid.setIconSize(QSize(110, 110))
-        self.grid.setGridSize(QSize(126, 158))
-        self.grid.setFixedHeight(176)
+        self.grid.setGridSize(QSize(132, 178))
+        self.grid.setFixedHeight(196)
         self.grid.setMovement(QListWidget.Static)
         self.grid.setWordWrap(True)
         self.grid.setSelectionMode(QAbstractItemView.SingleSelection)
-        none = QListWidgetItem("None\n(leave as is)")
-        none.setSizeHint(QSize(120, 150)); none.setTextAlignment(Qt.AlignCenter)
-        none.setData(Qt.UserRole, None)
+        # the chosen cover: thick accent frame and tint, so it can't be missed
+        self.grid.setStyleSheet(
+            f"QListWidget {{ background: transparent; border: none; }}"
+            f"QListWidget::item {{ border: 3px solid transparent; border-radius: 8px; padding: 2px; }}"
+            f"QListWidget::item:hover {{ border: 3px solid {t.separator.name()}; }}"
+            f"QListWidget::item:selected {{ border: 3px solid {t.accent.name()}; color: {t.text_primary.name()};"
+            f" background: {t.tint(t.accent, 0.25).name(QColor.HexArgb)}; }}")
+        none = QListWidgetItem("None\n(keep the current cover)")
+        none.setSizeHint(QSize(124, 170)); none.setTextAlignment(Qt.AlignCenter)
+        none.setData(Qt.UserRole, None); none.setData(Qt.UserRole + 1, none.text())
         self.grid.addItem(none)
-        self.grid.setCurrentRow(0)
         lay.addWidget(self.grid, 1)
-        self.picked_by_hand = False
-        self.grid.itemClicked.connect(lambda _: setattr(self, "picked_by_hand", True))
+        self.auto = True               # still free to pre-pick; a click makes the choice yours
+        self._moving = False
+        self.grid.itemClicked.connect(self._clicked)
+        self.grid.currentItemChanged.connect(self._chosen)
+        self.grid.setCurrentRow(0)
+
+    def _clicked(self, _item):
+        self.auto = False
+
+    def _chosen(self, item, previous):
+        if self._moving or item is None:
+            return
+        if previous is not None:
+            previous.setText(previous.data(Qt.UserRole + 1))
+        item.setText("✓ CHOSEN\n" + item.data(Qt.UserRole + 1))
+        # show it under WILL BE
+        r = item.data(Qt.UserRole)
+        if r is None:
+            if self.current is not None:
+                self.new.setPixmap(self.now.pixmap())
+            else:
+                self.new.setPixmap(QPixmap()); self.new.setText("No cover")
+        else:
+            self.new.setText("")
+            self.new.setPixmap(item.icon().pixmap(QSize(self.TILE, self.TILE)))
+        # and put it first in the row
+        row = self.grid.row(item)
+        if row > 0:
+            self._moving = True
+            self.grid.takeItem(row)
+            self.grid.insertItem(0, item)
+            self.grid.setCurrentItem(item)
+            self._moving = False
+        self.grid.scrollToItem(item)
+        self.grid.horizontalScrollBar().setValue(0)
 
     def add(self, r: dict, img: QImage):
         pix = QPixmap.fromImage(img.scaled(220, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         pix.setDevicePixelRatio(2.0)
         year = f" ({r['year']})" if r.get("year") else ""
-        it = QListWidgetItem(QIcon(pix), f"{r['album']}{year}\n{r['source']}")
+        text = f"{r['album']}{year}\n{r['source']}"
+        icon = QIcon(pix)
+        icon.addPixmap(pix, QIcon.Selected)      # the chosen cover stays at full brightness
+        it = QListWidgetItem(icon, text)
         it.setToolTip(f"{r['album']}{year}\n{r['artist']}\nfrom {r['source']}")
-        it.setData(Qt.UserRole, r)
+        it.setData(Qt.UserRole, r); it.setData(Qt.UserRole + 1, text)
         it.setTextAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.grid.addItem(it)
         # pre-pick the first cover whose album title matches; never a guess
-        if not self.picked_by_hand and self.grid.currentRow() == 0 and norm(r["album"]) == norm(self.title) != "":
+        if self.auto and self.choice() is None and norm(r["album"]) == norm(self.title) != "":
             self.grid.setCurrentItem(it)
 
     def choice(self) -> dict | None:
