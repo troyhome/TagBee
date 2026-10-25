@@ -98,7 +98,7 @@ Album Artist, Composer, Disc Number + Compilation, **More fields** for the rest,
 - `covers.py` - online cover search (Apple Music / iTunes and MusicBrainz Cover Art Archive)
 - `tagio.py` - reading/writing tags for each format (no GUI)
 - `widgets.py` - MacBee-style controls: sidebar rows, flat icon buttons, capsules, Yes/No switch
-- `make_icon.py` - draws `icon.png` in MacBee's icon style
+- `make_icon.py` - draws `icon.png` (Bee Tag: amber tag with MacBee's bee, matching MacBee's Vinyl Bee icon)
 - `make_symbols.swift` - saves the SF Symbols (the same icons MacBee uses) into `icons/`: `swift make_symbols.swift`
 - Folders ending in `.nosync` (libraries and build output) are skipped by iCloud, so they don't upload
 - `test_tagio.py` - round-trip tests: `python3 test_tagio.py <folder of sample audio>`
