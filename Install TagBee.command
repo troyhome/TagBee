@@ -51,6 +51,11 @@ if [ -f icon.png ] && command -v iconutil >/dev/null; then
   rm -rf icon.iconset
 fi
 
+# TagBee's AcoustID app key (Identify Songs), built into the app so it needs no setup. Taken from the key
+# pasted in TagBee on this Mac; kept out of Git.
+KEY="$(defaults read com.tagbee.TagBee acoustidKey 2>/dev/null || true)"
+if [ -n "$KEY" ]; then printf '%s' "$KEY" > acoustid_key.txt; fi
+
 # ---- 4. build the app (method A: self-contained; method B: lightweight launcher)
 APP=""
 build_standalone() {
@@ -69,7 +74,9 @@ build_standalone() {
 build_launcher() {
   rm -rf dist.nosync/TagBee.app; mkdir -p dist.nosync/TagBee.app/Contents/MacOS dist.nosync/TagBee.app/Contents/Resources
   mkdir -p "$APP_SUPPORT"
-  cp tagbee.py tagio.py theme.py widgets.py covers.py lyrics.py requirements.txt icon.png "$APP_SUPPORT/"
+  cp tagbee.py tagio.py theme.py widgets.py covers.py lyrics.py identify.py version.py requirements.txt icon.png "$APP_SUPPORT/"
+  if [ -f acoustid_key.txt ]; then cp acoustid_key.txt "$APP_SUPPORT/"; fi
+  rm -rf "$APP_SUPPORT/bin"; cp -R bin "$APP_SUPPORT/bin"
   rm -rf "$APP_SUPPORT/icons"; cp -R icons "$APP_SUPPORT/icons"
   "$PY" -m venv "$APP_SUPPORT/.venv" \
     && "$APP_SUPPORT/.venv/bin/python" -m pip install --quiet --upgrade pip \

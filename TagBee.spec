@@ -7,7 +7,7 @@ VERSION = re.search(r'VERSION = "([^"]+)"', open("version.py").read()).group(1)
 exts = ["flac", "m4a", "m4b", "mp4", "mp3", "ogg", "opus", "wav", "aif", "aiff"]
 icon = "icon.icns" if os.path.exists("icon.icns") else None
 
-a = Analysis(["tagbee.py"], pathex=["."], datas=[("icon.png", "."), ("icons", "icons")], binaries=[("bin/fpcalc", "bin")], excludes=["tkinter", "unittest", "pydoc"])
+a = Analysis(["tagbee.py"], pathex=["."], datas=[("icon.png", "."), ("icons", "icons")] + ([("acoustid_key.txt", ".")] if os.path.exists("acoustid_key.txt") else []), binaries=[("bin/fpcalc", "bin")], excludes=["tkinter", "unittest", "pydoc"])
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="TagBee", console=False,
           argv_emulation=False)

@@ -63,6 +63,17 @@ def resource_path(name: str):
     return None
 
 
+def save_problem(exc: Exception) -> str:
+    """Plain words for why a file couldn't be written."""
+    import errno
+    if getattr(exc, "errno", None) == errno.EROFS:
+        return ("this drive is connected read-only, so TagBee can't change files on it. Connect it with write "
+                "access (or copy the songs to a drive you can write to) and try again.")
+    if getattr(exc, "errno", None) in (errno.EACCES, errno.EPERM):
+        return "you don't have permission to change this file (check the folder's or drive's sharing settings)."
+    return str(exc)
+
+
 def norm_key(s: str) -> str:
     return "".join(ch for ch in s.lower() if ch.isalnum())
 
@@ -1723,7 +1734,7 @@ class MainWindow(QMainWindow):
                 self.write_lrc(t)
                 report.saved += 1
             except Exception as exc:
-                report.errors.append(f"{t.path.name}: not saved ({exc})")
+                report.errors.append(f"{t.path.name}: not saved ({save_problem(exc)})")
             done += 1
         for n, t in enumerate(renames, 1):
             progress.setLabelText(f"Renaming {n} of {len(renames)}\n{t.path.name}"); progress.setValue(done)
@@ -2008,7 +2019,7 @@ class MainWindow(QMainWindow):
                     t.size = t.path.stat().st_size
                     self.write_lrc(t)
                 except Exception as exc:
-                    errors.append(f"{t.path.name}: {exc}")
+                    errors.append(f"{t.path.name}: {save_problem(exc)}")
         finally:
             QApplication.restoreOverrideCursor()
         for row in range(self.table.rowCount()):

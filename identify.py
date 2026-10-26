@@ -107,6 +107,18 @@ def fingerprint(path: Path, timeout_ms: int = 120000):
 
 # ---- online lookups
 
+def builtin_key() -> str:
+    """TagBee's own AcoustID app key, put in the app when it's built (acoustid_key.txt, not kept in Git), so
+    nobody has to set anything up."""
+    import sys
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    for cand in (base / "acoustid_key.txt", base.parent / "Resources" / "acoustid_key.txt",
+                 Path(__file__).resolve().parent / "acoustid_key.txt"):
+        if cand.exists():
+            return cand.read_text().strip()
+    return ""
+
+
 class KeyProblem(Exception):
     pass
 
@@ -264,9 +276,10 @@ class IdentifyDialog(QDialog):
                       "on several, then click Apply. Commit to File saves the changes.")
         head.setWordWrap(True); lay.addWidget(head)
 
+        builtin = builtin_key()
         keyrow = QHBoxLayout()
         keyrow.addWidget(QLabel("AcoustID key:"))
-        self.key = QLineEdit(str(settings.value("acoustidKey", "")))
+        self.key = QLineEdit(str(settings.value("acoustidKey", "")) or builtin)
         self.key.setPlaceholderText("Paste your free app key from acoustid.org (see README)")
         self.key.setEchoMode(QLineEdit.Normal)
         keyrow.addWidget(self.key, 1)
@@ -274,6 +287,9 @@ class IdentifyDialog(QDialog):
         self.start_btn.clicked.connect(self.start)
         keyrow.addWidget(self.start_btn)
         lay.addLayout(keyrow)
+        if builtin and not settings.value("acoustidKey", ""):
+            for n in range(keyrow.count()):        # the app has its own key: nothing to set up
+                keyrow.itemAt(n).widget().setVisible(False)
 
         self.table = QTableWidget(len(tracks), 5)
         self.table.setHorizontalHeaderLabels(["USE", "NOW", "FOUND", "ALBUM", "SURE"])
@@ -324,7 +340,8 @@ class IdentifyDialog(QDialog):
         if not key:
             self.status.setText("Paste your AcoustID app key first.")
             return
-        self.settings.setValue("acoustidKey", key)
+        if key != builtin_key():
+            self.settings.setValue("acoustidKey", key)
         if not fpcalc_path():
             self.status.setText("The fingerprint tool (fpcalc) is missing from TagBee. Reinstall TagBee.")
             return
