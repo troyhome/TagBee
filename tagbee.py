@@ -31,6 +31,7 @@ from lyrics import LyricsFinder, find_duplicates, quality_score
 from widgets import FieldBox, FlatButton, Segmented, eyebrow_font, symbol
 
 APP_NAME = "TagBee"
+from version import VERSION
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 MULTI = "< keep >"
 MIXED_HINT = "< keep >"          # Mp3tag's wording: the tracks differ, typing replaces all
@@ -924,10 +925,13 @@ class MainWindow(QMainWindow):
         m.addActions([self.act_remove, self.act_clear])
         m = self.menuBar().addMenu("&Edit")
         m.addActions([self.act_selall, self.act_selnone, self.act_revert])
+        self.act_about = act("About TagBee", self.show_about)
+        self.act_about.setMenuRole(QAction.AboutRole)          # macOS puts it in the TagBee menu
         m = self.menuBar().addMenu("&Tools")
         m.addActions([self.act_comp, self.act_number, self.act_rename, self.act_find_cover,
                       self.act_identify, self.act_lyrics, self.act_dupes])
         m.addSeparator(); m.addAction(self.act_wand)
+        self.menuBar().addMenu("&Help").addAction(self.act_about)
 
         m = self.menuBar().addMenu("&View")
         theme_menu = m.addMenu("Theme")
@@ -1785,6 +1789,12 @@ class MainWindow(QMainWindow):
         self.update_status()
         return moved
 
+    def show_about(self):
+        QMessageBox.about(self, f"About {APP_NAME}",
+                          f"<b>{APP_NAME} {VERSION}</b><br><br>A music tag editor in MacBee's style.<br>"
+                          "github.com/troyhome/TagBee<br><br>"
+                          "Identify Songs uses Chromaprint and AcoustID (LGPL / free web service) and MusicBrainz.")
+
     def identify_songs(self):
         """Recognise the selected songs (or all; with none selected, only those missing info) by their sound."""
         self.apply_draft()
@@ -2139,6 +2149,7 @@ def main():
         sys.exit(cli_set_cover(sys.argv[2], sys.argv[3:]))
     app = TagBeeApp(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(VERSION)
     app.setStyle("Fusion")      # draws every control from our theme colours (the native Mac style ignores some)
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     for cand in (base / "icon.png", base.parent / "Resources" / "icon.png"):

@@ -65,8 +65,8 @@ APPLESCRIPT
             exit 1
         fi
         git pull --ff-only -q
-        SPEC="$ROOT/TagBee.spec"
-        CURRENT="$(sed -nE 's/.*"CFBundleShortVersionString": "([^"]+)".*/\1/p' "$SPEC")"
+        SPEC="$ROOT/version.py"
+        CURRENT="$(sed -nE 's/^VERSION = "([^"]+)".*/\1/p' "$SPEC")"
         if git rev-parse -q --verify "refs/tags/v$CURRENT" >/dev/null; then
             NEW="${2:-$(echo "$CURRENT" | awk -F. '{ $NF = $NF + 1; print }' OFS=.)}"   # 1.0 -> 1.1
         else
@@ -76,7 +76,7 @@ APPLESCRIPT
             echo "Version $NEW was already released. Give a newer one: $0 release <version>" >&2
             exit 1
         fi
-        sed -i '' -E "s/(\"CFBundleShortVersionString\": \")[^\"]+/\1$NEW/" "$SPEC"
+        sed -i '' -E "s/^VERSION = \"[^\"]+\"/VERSION = \"$NEW\"/" "$SPEC"
         "$0" install
         APP="$ROOT/dist.nosync/TagBee.app"
         STAGE="$(mktemp -d)"

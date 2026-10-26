@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
                                QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout)
 
-USER_AGENT = b"TagBee/1.1 ( https://github.com/troyhome/TagBee )"
+from version import USER_AGENT
 ACOUSTID_URL = "https://api.acoustid.org/v2/lookup"
 MB_URL = "https://musicbrainz.org/ws/2/recording/"
 MIN_SCORE = 0.5            # AcoustID's confidence; below this the match is a guess

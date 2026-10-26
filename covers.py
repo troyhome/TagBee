@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QProgressBar, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
-USER_AGENT = b"TagBee/1.0 ( https://github.com/troyhome/TagBee )"   # MusicBrainz asks apps to say who they are
+from version import USER_AGENT
 THUMB = 160
 _NET = None
 

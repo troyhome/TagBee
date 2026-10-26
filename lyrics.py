@@ -12,7 +12,7 @@ import re
 from PySide6.QtCore import QEventLoop, QTimer, QUrl, QUrlQuery
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
-USER_AGENT = b"TagBee/1.1 ( https://github.com/troyhome/TagBee )"
+from version import USER_AGENT
 LOSSLESS = {"FLAC", "ALAC", "WAV", "AIFF"}
 COPY_SUFFIX = re.compile(r"(\s*\(\d+\)|\s+copy(\s+\d+)?|\s*-\s*copy)$", re.I)   # " (2)", " copy", " copy 3"
 

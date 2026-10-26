@@ -1,5 +1,8 @@
 # PyInstaller spec - builds TagBee.app. Used by build_app.command.
 import os
+import re
+
+VERSION = re.search(r'VERSION = "([^"]+)"', open("version.py").read()).group(1)
 
 exts = ["flac", "m4a", "m4b", "mp4", "mp3", "ogg", "opus", "wav", "aif", "aiff"]
 icon = "icon.icns" if os.path.exists("icon.icns") else None
@@ -14,7 +17,7 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "TagBee",
         "CFBundleDisplayName": "TagBee",
-        "CFBundleShortVersionString": "1.1",
+        "CFBundleShortVersionString": VERSION,
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "11.0",
         "CFBundleDocumentTypes": [{

@@ -51,7 +51,7 @@ albums (album, single, compilation) you pick one; songs in one folder are pre-se
 title, artist or album. Fix All offers to identify those first.
 
 It needs a free AcoustID app key, once per Mac: sign in at https://acoustid.org (with a MusicBrainz account),
-open **Your applications ▸ Register a new application** (name TagBee, version 1.1, website
+open **Your applications ▸ Register a new application** (name TagBee, version 1.2, website
 https://github.com/troyhome/TagBee), copy the **API key** and paste it in the Identify Songs window.
 
 ## Fix All
@@ -111,6 +111,7 @@ Album Artist, Composer, Disc Number + Compilation, **More fields** for the rest,
 - `identify.py` - Identify Songs (Chromaprint fingerprint → AcoustID → MusicBrainz)
 - `bin/fpcalc` - Chromaprint's fingerprint tool (macOS universal)
 - `covers.py` - online cover search (Apple Music / iTunes and MusicBrainz Cover Art Archive)
+- `version.py` - the version number (shown in TagBee ▸ About TagBee; `release` raises it)
 - `tagio.py` - reading/writing tags for each format (no GUI)
 - `widgets.py` - MacBee-style controls: sidebar rows, flat icon buttons, capsules, Yes/No switch
 - `make_icon.py` - draws `icon.png` (Bee Tag: amber tag with MacBee's bee, matching MacBee's Vinyl Bee icon)
