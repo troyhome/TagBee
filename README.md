@@ -41,6 +41,19 @@ copies to the Trash. **Tools ▸ Find Lyrics…** (⇧⌘L) looks up lyrics on L
 they're added to the songs and written on Commit to File, and time-synced lyrics are also saved as a `.lrc` file
 next to each song (renames move it along).
 
+## Identify Songs (like MusicBrainz Picard)
+**Tools ▸ Identify Songs…** (⇧⌘I, or the sidebar) recognises songs by their sound, so it works for files with no
+tags or a name like "Track 07.flac". Chromaprint's `fpcalc` (bundled in `bin/`, version 1.6.2 from
+github.com/acoustid/chromaprint, LGPL) makes an audio fingerprint, AcoustID says which MusicBrainz recording it is,
+and MusicBrainz gives the title, artist, album, album artist, year, track and disc. When a song is on several
+albums (album, single, compilation) you pick one; songs in one folder are pre-set to the album they share. Songs
+80% sure or more are ticked. Apply, then Commit to File. With no songs selected it identifies those missing a
+title, artist or album. Fix All offers to identify those first.
+
+It needs a free AcoustID app key, once per Mac: sign in at https://acoustid.org (with a MusicBrainz account),
+open **Your applications ▸ Register a new application** (name TagBee, version 1.1, website
+https://github.com/troyhome/TagBee), copy the **API key** and paste it in the Identify Songs window.
+
 ## Fix All
 **Tools ▸ Fix All…** (⇧⌘W, or the sidebar) does everything in one go for every loaded track: it finds covers
 online for each album and lets you pick one per album, can move duplicates to the Trash and find lyrics, (a match is pre-picked only when the title agrees; None
@@ -95,6 +108,8 @@ Album Artist, Composer, Disc Number + Compilation, **More fields** for the rest,
 - `tagbee.py` - the app window
 - `theme.py` - every colour (MacBee's theme tokens: background, surface, accent…) and the stylesheet
 - `lyrics.py` - online lyrics (LRCLIB) and duplicate finding
+- `identify.py` - Identify Songs (Chromaprint fingerprint → AcoustID → MusicBrainz)
+- `bin/fpcalc` - Chromaprint's fingerprint tool (macOS universal)
 - `covers.py` - online cover search (Apple Music / iTunes and MusicBrainz Cover Art Archive)
 - `tagio.py` - reading/writing tags for each format (no GUI)
 - `widgets.py` - MacBee-style controls: sidebar rows, flat icon buttons, capsules, Yes/No switch

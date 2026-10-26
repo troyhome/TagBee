@@ -26,6 +26,7 @@ import tagio
 import theme
 from tagio import Track
 from covers import CoverSearchDialog, MagicWandDialog
+from identify import IdentifyDialog, needs_identifying
 from lyrics import LyricsFinder, find_duplicates, quality_score
 from widgets import FieldBox, FlatButton, Segmented, eyebrow_font, symbol
 
@@ -622,6 +623,8 @@ class MainWindow(QMainWindow):
         row("Rename Files", "character.cursor.ibeam", self.rename_files, "Rename files from their tags")
         row("Remove Duplicates", "square.on.square", self.remove_duplicates,
             "Find songs loaded more than once and move the extra copies to the Trash")
+        row("Identify Songs", "waveform", self.identify_songs,
+            "Recognise songs by their sound (AcoustID + MusicBrainz) and fill in title, artist, album, track…")
         row("Find Lyrics", "text.quote", self.find_lyrics, "Look up lyrics online for the selected songs (or all)")
         row("Fix All", "wand.and.stars", self.magic_wand,
             "Every track: find covers (you choose), rename to the default style, and save, in one go")
@@ -908,6 +911,8 @@ class MainWindow(QMainWindow):
         self.act_dupes = act("Remove Duplicates…", self.remove_duplicates, None,
                              "Find songs loaded more than once and move the extra copies to the Trash")
         self.act_lyrics = act("Find Lyrics…", self.find_lyrics, "Ctrl+Shift+L", "Look up lyrics online")
+        self.act_identify = act("Identify Songs…", self.identify_songs, "Ctrl+Shift+I",
+                                "Recognise songs by their sound and fill in their tags")
         self.act_wand = act("Fix All…", self.magic_wand, "Ctrl+Shift+W",
                             "Find covers, rename to the default style and save every track in one go")
         self.act_selall = act("Select All", self.select_all, QKeySequence.SelectAll)
@@ -921,7 +926,7 @@ class MainWindow(QMainWindow):
         m.addActions([self.act_selall, self.act_selnone, self.act_revert])
         m = self.menuBar().addMenu("&Tools")
         m.addActions([self.act_comp, self.act_number, self.act_rename, self.act_find_cover,
-                      self.act_lyrics, self.act_dupes])
+                      self.act_identify, self.act_lyrics, self.act_dupes])
         m.addSeparator(); m.addAction(self.act_wand)
 
         m = self.menuBar().addMenu("&View")
@@ -1631,6 +1636,17 @@ class MainWindow(QMainWindow):
         self.table.selectAll()
         self.apply_draft()
         tracks = [self.track_at(r) for r in range(self.table.rowCount())]
+        unknown = [t for t in tracks if needs_identifying(t)]
+        if unknown:
+            box = QMessageBox(self)
+            box.setWindowTitle("Fix All")
+            box.setText(f"{len(unknown)} song{'s are' if len(unknown) != 1 else ' is'} missing a title, artist or album.")
+            box.setInformativeText("Identify them by their sound first? Their tags are filled in before covers are found.")
+            go = box.addButton("Identify First", QMessageBox.AcceptRole)
+            box.addButton("Skip", QMessageBox.RejectRole)
+            box.exec()
+            if box.clickedButton() is go:
+                self.run_identify(unknown)
         albums = self.album_groups(tracks)
         label, pattern = RENAME_PRESETS[0]
         renames = [t for t in tracks if (stem := tagio.format_filename(pattern, t.tags)) and stem != t.path.stem]
@@ -1768,6 +1784,30 @@ class MainWindow(QMainWindow):
         self.populate_panel(self.selected_tracks())
         self.update_status()
         return moved
+
+    def identify_songs(self):
+        """Recognise the selected songs (or all; with none selected, only those missing info) by their sound."""
+        self.apply_draft()
+        tracks = self.selected_tracks()
+        if not tracks:
+            everything = [self.track_at(r) for r in range(self.table.rowCount())]
+            tracks = [t for t in everything if needs_identifying(t)] or everything
+        if not tracks:
+            QMessageBox.information(self, APP_NAME, "Add some music first, then identify it.")
+            return
+        changed = self.run_identify(tracks)
+        if changed:
+            self.statusBar().showMessage(f"{changed} song{'s' if changed != 1 else ''} identified. "
+                                         "Commit to File (⌘S) saves them.", 8000)
+
+    def run_identify(self, tracks) -> int:
+        dlg = IdentifyDialog(self, tracks, self.settings)
+        dlg.exec()
+        if dlg.applied:
+            self.refresh_tracks(dlg.applied)
+            self.populate_panel(self.selected_tracks())
+            self.update_status()
+        return len(dlg.applied)
 
     def find_lyrics(self):
         tracks = self.tool_tracks()
